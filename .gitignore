@@ -1,0 +1,7 @@
+.env
+demo.db
+*.log
+__pycache__/
+.venv/
+run.log
+buscar.log

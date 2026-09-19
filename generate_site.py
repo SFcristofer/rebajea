@@ -1,0 +1,363 @@
+"""Genera el sitio estático en docs/ desde prices.db. Ejecutar: python generate_site.py"""
+import json
+import re
+import unicodedata
+import sqlite3
+import sys
+from datetime import date
+from collections import Counter
+from html import escape
+from urllib.parse import urlencode
+
+import config
+
+FAQ = [
+    ("¿Cómo detectan las ofertas?",
+     "Guardamos el precio de cada producto de forma periódica y lo comparamos con su historial. "
+     "Es oferta lo que cuesta menos que su precio más alto registrado o que tiene una promoción "
+     "activa en la tienda, sin importar el porcentaje."),
+    ("¿Cuesta algo usar el sitio?",
+     "No. Es gratuito. Si compras desde nuestros enlaces, la tienda puede pagarnos una comisión "
+     "sin costo extra para ti."),
+    ("¿Los precios son definitivos?",
+     "Los precios cambian rápido. Confirma siempre el precio final en Mercado Libre antes de comprar."),
+]
+
+
+# páginas de búsqueda específica: (título, regex sobre el nombre); se ordenan por precio
+TV = r"(?i)^(?=.*(tv|televisi|pantalla)).*\b%s\b"
+TOPICS = [
+    ("Smart TV y pantallas de 32 pulgadas", TV % 32),
+    ("Smart TV y pantallas de 40 pulgadas", TV % 40),
+    ("Smart TV y pantallas de 43 pulgadas", TV % 43),
+    ("Smart TV y pantallas de 50 pulgadas", TV % 50),
+    ("Smart TV y pantallas de 55 pulgadas", TV % 55),
+    ("Laptops", r"(?i)laptop|notebook"),
+    ("Audífonos Bluetooth", r"(?i)aud[ií]fonos.*(bluetooth|inal)|bluetooth.*aud[ií]fonos"),
+    ("Lavadoras", r"(?i)lavadora"),
+    ("Refrigeradores", r"(?i)refrigerador"),
+    ("Consolas de videojuegos", r"(?i)consola|playstation|xbox|nintendo"),
+]
+
+
+def slug(s):
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+
+
+def load():
+    conn = sqlite3.connect(sys.argv[1] if len(sys.argv) > 1 else config.DB_PATH)
+    rows = conn.execute(
+        """SELECT p.name, p.link, p.category, p.image, p.id,
+                  (SELECT price FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1),
+                  (SELECT rep FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1),
+                  MAX((SELECT MAX(price) FROM prices WHERE product_id=p.id),
+                      COALESCE((SELECT orig FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1), 0))
+           FROM products p"""
+    ).fetchall()
+    items = []
+    today = date.today().isoformat()
+    for name, link, cat, image, pid, now, rep, top in rows:
+        if now is None or not rep:  # sin vendedor confiable verificado no se publica
+            continue
+        pct = (top - now) / top * 100 if top else 0
+        hist = conn.execute("SELECT price, date(seen_at) FROM prices WHERE product_id=? ORDER BY seen_at, rowid",
+                            (pid,)).fetchall()
+        ps = [h[0] for h in hist]
+        tag = ""
+        if len(ps) > 1 and ps[-1] < ps[-2] and hist[-1][1] == today:
+            tag = "Bajó hoy"
+        elif len(ps) > 1 and now == min(ps) and pct > 0:
+            tag = "Mínimo histórico"
+        elif pct > 0:
+            tag = "En promoción"
+        items.append(dict(name=name, link=link, cat=cat, image=image, rep=rep, now=now, top=top, pct=pct, ps=ps, tag=tag))
+    items.sort(key=lambda i: (-i["pct"], i["now"]))  # mejor promoción primero; a igualdad, el más barato
+    return items
+
+
+def aff(link):
+    return link + ("&" if "?" in link else "?") + urlencode(config.AFFILIATE)
+
+
+def money(x):
+    return f"${x:,.0f}"
+
+
+def spark(ps):
+    if len(ps) < 2 or max(ps) == min(ps):
+        return ""
+    lo, hi, n = min(ps), max(ps), len(ps) - 1
+    pts = " ".join(f"{k / n * 56:.1f},{16 - (p - lo) / (hi - lo) * 14:.1f}" for k, p in enumerate(ps))
+    return (f'<svg class="sp" viewBox="0 0 56 18" width="56" height="18" aria-hidden="true">'
+            f'<polyline points="{pts}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>')
+
+
+def card(i):
+    deal = i["pct"] >= config.MIN_DROP_PCT
+    badge = f'<span class="badge{" hot" if i["pct"] >= 30 else ""}">{"🔥 " if i["pct"] >= 30 else ""}-{i["pct"]:.0f}%</span>' if deal else ""
+    old = f'<s>{money(i["top"])}</s>' if deal else ""
+    save = f'<p class="save">Ahorras {money(i["top"] - i["now"])}</p>' if deal else ""
+    bar = f'<div class="bar"><i style="width:{min(i["pct"], 100):.0f}%"></i></div>' if deal else ""
+    hot = i["pct"] >= 30
+    trend = (f'<p class="trend">{spark(i["ps"])}<span>{i["tag"]}</span></p>' if i["tag"] or spark(i["ps"]) else "")
+    img = (f'<img src="{escape(i["image"])}" alt="{escape(i["name"])}" width="300" height="225" loading="lazy">'
+           if i["image"] else "")
+    return f"""<a class="card{' hot' if hot else ''}" href="{escape(aff(i['link']))}" target="_blank" rel="sponsored noopener">
+  {badge}<div class="img">{img}</div>
+  <div class="body"><span class="cat" title="{escape(i['cat'])}">{escape(i['cat'].split(',')[0])}</span>
+  <h3>{escape(i['name'])}</h3>
+  <p class="price"><strong>{money(i['now'])}</strong> {old} <small>MXN</small></p>
+  {bar}{save}{trend}
+  <p class="rep">✓ {escape(i['rep'])}</p>
+  <span class="go">Ver oferta →</span></div>
+</a>"""
+
+
+PER_PAGE = 24
+TABS = [("Inicio", ""), ("Ofertas", "ofertas/"), ("Categorías", "c/"), ("Más buscados", "t/")]
+DISCLAIMER = ("es un sitio independiente y no está afiliado a Mercado Libre. Como afiliado podemos recibir "
+              "comisiones por compras elegibles. Los precios pueden cambiar; verifícalos en la tienda.")
+
+
+def rel(path):
+    """Prefijo relativo para volver a la raíz desde una ruta como 'c/x/2/' (funciona en subcarpetas de GitHub Pages)."""
+    return "../" * path.count("/")
+
+
+def layout(path, title, desc, body, active="", ld=(), robots="index, follow", prev=None, nxt=None):
+    """Envoltorio común: head SEO, navbar con buscador y pestañas, footer y scripts."""
+    up, url = rel(path), f"{config.SITE_URL}/{path}"
+    links = "".join(f'<link rel="{r}" href="{config.SITE_URL}/{p}">' for r, p in (("prev", prev), ("next", nxt)) if p is not None)
+    tabs = "".join(f'<a href="{up}{p}"{" class=on" if n == active else ""}>{n}</a>' for n, p in TABS)
+    return f"""<!doctype html>
+<html lang="es-MX">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{escape(title)}</title>
+<meta name="description" content="{escape(desc)}">
+<link rel="canonical" href="{url}">{links}
+<meta name="robots" content="{robots}, max-image-preview:large">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="es_MX">
+<meta property="og:site_name" content="{config.SITE_NAME}">
+<meta property="og:title" content="{escape(title)}">
+<meta property="og:description" content="{escape(desc)}">
+<meta property="og:url" content="{url}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#07080d">
+<link rel="stylesheet" href="{up}style.css">
+<script type="application/ld+json">{json.dumps(list(ld), ensure_ascii=False)}</script>
+</head>
+<body data-up="{up}">
+<header class="top"><div class="wrap nav">
+  <a class="logo" href="{up}">📉 {config.SITE_NAME}</a>
+  <form class="sb" action="{up}buscar/" role="search"><input id="q" name="q" type="search" placeholder="Buscar productos…" aria-label="Buscar producto" autocomplete="off"><div id="sug" hidden></div></form>
+  <nav class="tabs">{tabs}</nav>
+</div></header>
+<main>
+{body}
+</main>
+<footer><div class="wrap">
+  <nav class="fl">{tabs}</nav>
+  <p>{config.SITE_NAME} {DISCLAIMER}</p>
+</div></footer>
+<script src="{up}app.js" defer></script>
+</body>
+</html>"""
+
+
+def item_ld(items, start=1):
+    return {"@context": "https://schema.org", "@type": "ItemList", "itemListElement": [
+        {"@type": "ListItem", "position": n, "item": {
+            "@type": "Product", "name": i["name"], "image": i["image"],
+            "offers": {"@type": "Offer", "price": round(i["now"], 2), "priceCurrency": "MXN",
+                       "url": aff(i["link"]), "availability": "https://schema.org/InStock"}}}
+        for n, i in enumerate(items, start)]}
+
+
+def crumbs(trail):
+    """trail = [(nombre, ruta)]; el último no es enlace. Devuelve (html, json-ld)."""
+    up = rel(trail[-1][1])
+    html = " › ".join(f'<a href="{up}{p}">{escape(n)}</a>' for n, p in trail[:-1]) + f" › {escape(trail[-1][0])}"
+    ld = {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [
+        {"@type": "ListItem", "position": k, "name": n, "item": f"{config.SITE_URL}/{p}"} for k, (n, p) in enumerate(trail, 1)]}
+    return f'<nav class="crumb">{html}</nav>', ld
+
+
+def pager(base, n, total):
+    if total < 2:
+        return ""
+    up = rel(base if n == 1 else f"{base}{n}/")
+    u = lambda k: f'{up}{base}{"" if k == 1 else f"{k}/"}'
+    out, last = [], 0
+    for k in sorted({1, total, *range(n - 1, n + 2)} & set(range(1, total + 1))):
+        if last and k - last > 1:
+            out.append('<span class="gap">…</span>')
+        out.append(f'<a class="pg on" aria-current="page">{k}</a>' if k == n else f'<a class="pg" href="{u(k)}">{k}</a>')
+        last = k
+    p = f'<a class="pg" rel="prev" href="{u(n - 1)}">‹ Anterior</a>' if n > 1 else ""
+    x = f'<a class="pg" rel="next" href="{u(n + 1)}">Siguiente ›</a>' if n < total else ""
+    return f'<nav class="pager" aria-label="Paginación">{p}{"".join(out)}{x}</nav>'
+
+
+def paged(base, active, trail, title, desc, h1, lead, items, after=""):
+    """Genera una página estática por cada PER_PAGE productos: base, base+'2/', base+'3/'…  → {ruta: html}."""
+    total = max(1, -(-len(items) // PER_PAGE))
+    out = {}
+    for n in range(1, total + 1):
+        path = base if n == 1 else f"{base}{n}/"
+        chunk = items[(n - 1) * PER_PAGE:n * PER_PAGE]
+        crumb_html, crumb_ld = crumbs(trail if n == 1 else trail + [(f"Página {n}", path)])
+        suffix = f" - Página {n}" if n > 1 else ""
+        body = f"""<section class="wrap">{crumb_html}
+  <h1 class="lh">{escape(h1)}</h1>
+  <p class="lead lh">{lead}</p>
+  <div class="grid">{"".join(card(i) for i in chunk)}</div>
+  {pager(base, n, total)}</section>{after}"""
+        out[path] = layout(path, f"{title}{suffix} | {config.SITE_NAME}", desc + (f" Página {n} de {total}." if n > 1 else ""),
+                           body, active, [crumb_ld, item_ld(chunk, (n - 1) * PER_PAGE + 1)],
+                           prev=None if n == 1 else (base if n == 2 else f"{base}{n - 1}/"),
+                           nxt=None if n == total else f"{base}{n + 1}/")
+    return out
+
+
+def hub(path, active, name, h1, lead, entries):
+    """Índice de categorías o temas: entries = [(nombre, ruta, items)]."""
+    up = rel(path)
+    thumb = lambda i: f'<img src="{escape(i["image"])}" alt="" loading="lazy">' if i["image"] else ""
+    tiles = "".join(
+        f'<a class="tile" href="{up}{p}"><span class="ti">{thumb(s[0])}</span>'
+        f'<strong>{escape(n)}</strong><small>{len(s)} ofertas · desde {money(min(i["now"] for i in s))}</small></a>'
+        for n, p, s in entries)
+    crumb_html, crumb_ld = crumbs([(config.SITE_NAME, ""), (name, path)])
+    body = f'<section class="wrap">{crumb_html}<h1 class="lh">{escape(h1)}</h1><p class="lead lh">{lead}</p><div class="tiles">{tiles}</div></section>'
+    return layout(path, f"{h1} | {config.SITE_NAME}", lead, body, active, [crumb_ld])
+
+
+def home(items, deals, lists):
+    cats = [c for c, _ in Counter(i["cat"] for i in deals).most_common(8)]
+    cpath = {n: p for p, n, k, _ in lists if k == "c"}
+    today = date.today().isoformat()
+    title = f"Ofertas en Mercado Libre México hoy | {config.SITE_NAME}"
+    desc = ("Bajas de precio reales en Mercado Libre México, verificadas contra el historial: "
+            "electrónica, celulares, computación, hogar y videojuegos. Actualizado a diario.")
+    ld = [
+        {"@context": "https://schema.org", "@type": "WebSite", "name": config.SITE_NAME, "url": config.SITE_URL + "/",
+         "inLanguage": "es-MX", "potentialAction": {"@type": "SearchAction", "target": f"{config.SITE_URL}/buscar/?q={{q}}",
+                                                   "query-input": "required name=q"}},
+        item_ld(deals[:20]),
+        {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [
+            {"@type": "Question", "name": q, "acceptedAnswer": {"@type": "Answer", "text": a}} for q, a in FAQ]},
+    ]
+    rail = lambda h, its, more: (
+        f'<section class="wrap"><div class="sh"><h2>{h}</h2>{more}</div>'
+        '<div class="rail"><button class="nv l" aria-label="Anterior">‹</button><button class="nv r" aria-label="Siguiente">›</button>'
+        f'<div class="grid feat">{"".join(card(i) for i in its)}</div></div></section>')
+    rails = "".join(rail(f"Lo mejor en {escape(c)}", [d for d in deals if d["cat"] == c][:15],
+                         f'<a class="all" href="{cpath[c]}">Ver todo →</a>' if c in cpath else "") for c in cats)
+    explore = "".join(f'<a class="chip" href="{p}">{escape(n)}</a>' for p, n, k, _ in lists if k == "t")
+    faq = "".join(f"<details><summary>{escape(q)}</summary><p>{escape(a)}</p></details>" for q, a in FAQ)
+    body = f"""<section class="hero"><div class="wrap">
+  <p class="eyebrow"><span class="dot"></span> Mercado Libre México · {len(items)} productos vigilados · Actualizado {today}</p>
+  <h1>Compra más barato.<br><em>Solo ofertas reales.</em></h1>
+  <p class="lead">Rastreamos los precios más vendidos y mostramos únicamente lo que de verdad bajó, comparado con su historial.</p>
+  <div class="cta"><a class="btn big" href="ofertas/">Ver todas las ofertas</a><a class="ghost" href="#como-funciona">Cómo funciona</a></div>
+</div></section>
+{rail("Las mayores bajas", deals[:16], '<a class="all" href="ofertas/">Ver todas →</a>')}
+{rails}
+<section class="wrap"><h2>Explora por categoría</h2><div class="chips wrapc"><a class="chip on" href="c/">Todas las categorías</a>{explore}</div></section>
+<section id="como-funciona" class="wrap how">
+  <h2>Cómo funciona</h2>
+  <ol>
+    <li><strong>Vigilamos</strong>Los productos más vendidos de cada categoría.</li>
+    <li><strong>Comparamos</strong>Cada precio contra su historial real.</li>
+    <li><strong>Publicamos</strong>Solo lo que cuesta menos que antes.</li>
+  </ol>
+</section>
+<section id="faq" class="wrap"><h2>Preguntas frecuentes</h2>{faq}</section>"""
+    return layout("", title, desc, body, "Inicio", ld)
+
+
+def search_page():
+    body = """<section class="wrap"><h1 class="lh">Resultados para «<span id="rq"></span>»</h1>
+  <p class="none" id="none" hidden>No encontramos productos. Prueba con otra palabra o explora las <a class="all" href="../c/">categorías</a>.</p>
+  <div class="grid" id="res"></div>
+  <p class="more"><button class="chip" id="more" hidden>Ver más resultados</button></p></section>"""
+    return layout("buscar/", f"Buscar productos | {config.SITE_NAME}", "Busca ofertas en Mercado Libre México.", body, robots="noindex, follow")
+
+
+def build_listings(items):
+    """Devuelve [(ruta, nombre, tipo, items)] con al menos 3 productos."""
+    out = []
+    for c, _ in Counter(i["cat"] for i in items).most_common():
+        sel = [i for i in items if i["cat"] == c]
+        if len(sel) >= 3:
+            out.append((f"c/{slug(c)}/", c, "c", sel))
+    for name, rx in TOPICS:
+        sel = sorted((i for i in items if re.search(rx, i["name"])), key=lambda i: i["now"])
+        if len(sel) >= 3:
+            out.append((f"t/{slug(name)}/", name, "t", sel))
+    return out
+
+
+def build(items):
+    """Todas las páginas del sitio: {ruta: html}."""
+    today = date.today().isoformat()
+    deals = [i for i in items if i["pct"] >= config.MIN_DROP_PCT]
+    lists = build_listings(items)
+    pages = {"": home(items, deals, lists), "buscar/": search_page()}
+    lo = lambda s: money(min(i["now"] for i in s))
+    pages.update(paged(
+        "ofertas/", "Ofertas", [(config.SITE_NAME, ""), ("Ofertas", "ofertas/")],
+        "Todas las ofertas en Mercado Libre México",
+        f"{len(deals)} ofertas en Mercado Libre México con vendedores confiables, ordenadas de mayor a menor descuento. Actualizado {today}.",
+        "Todas las ofertas en Mercado Libre",
+        f"{len(deals)} productos con baja de precio, primero los de mayor descuento. Solo vendedores confiables. Actualizado {today}.",
+        deals))
+    for kind, tab, name, h1, lead in (
+            ("c", "Categorías", "Categorías", "Ofertas por categoría",
+             "Elige una categoría para ver sus mejores ofertas en Mercado Libre México, con vendedores confiables y precios verificados."),
+            ("t", "Más buscados", "Más buscados", "Lo más buscado en Mercado Libre",
+             "Pantallas, laptops, audífonos, electrodomésticos y consolas: las opciones más baratas, ordenadas de menor a mayor precio.")):
+        pages[f"{kind}/"] = hub(f"{kind}/", tab, name, h1, lead, [(n, p, s) for p, n, k, s in lists if k == kind])
+    for path, name, kind, sel in lists:
+        tab, hubname = ("Categorías", "Categorías") if kind == "c" else ("Más buscados", "Más buscados")
+        if kind == "t":
+            title = f"{name} más baratas en Mercado Libre (desde {lo(sel)})"
+            desc = f"{name} más baratas en Mercado Libre México desde {lo(sel)} MXN. {len(sel)} opciones de vendedores confiables, de menor a mayor precio. Actualizado {today}."
+            h1 = f"{name} más baratas en Mercado Libre"
+        else:
+            title = f"Ofertas en {name} en Mercado Libre México"
+            desc = f"{len(sel)} ofertas en {name} en Mercado Libre México desde {lo(sel)} MXN, con vendedores confiables y precios verificados. Actualizado {today}."
+            h1 = f"{name}: ofertas en Mercado Libre"
+        lead = f"{len(sel)} opciones desde {lo(sel)} MXN. Solo vendedores confiables (nivel verde, MercadoLíder o tienda oficial); precios comparados con su historial. Actualizado {today}."
+        pages.update(paged(path, tab, [(config.SITE_NAME, ""), (hubname, f"{kind}/"), (name, path)], title, desc, h1, lead, sel))
+    return pages
+
+
+def search_index(items):
+    return [dict(n=i["name"], c=i["cat"], p=round(i["now"]), t=round(i["top"]), d=round(i["pct"], 1),
+                 l=aff(i["link"]), i=i["image"] or "", r=i["rep"]) for i in items]
+
+
+def main():
+    out = config.OUT_DIR
+    out.mkdir(exist_ok=True)
+    items = load()
+    pages = build(items)
+    for path, html in pages.items():
+        (out / path).mkdir(parents=True, exist_ok=True)
+        (out / path / "index.html").write_text(html, encoding="utf-8")
+    (out / "search.json").write_text(json.dumps(search_index(items), ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    (out / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {config.SITE_URL}/sitemap.xml\n")
+    (out / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        + "".join(f"<url><loc>{config.SITE_URL}/{p}</loc><lastmod>{date.today().isoformat()}</lastmod>"
+                  "<changefreq>daily</changefreq></url>" for p in pages if p != "buscar/") + "</urlset>\n")
+    print(f"Sitio generado en {out}: {len(pages)} páginas")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,26 @@
+name: Actualizar precios
+on:
+  schedule: [{cron: "0 11 * * *"}]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
+      ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install requests
+      - run: python main.py
+      - run: python buscar.py
+      - run: python generate_site.py
+      - run: |
+          git config user.name "bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add prices.db docs
+          git diff --cached --quiet || git commit -m "Actualización diaria" && git push
