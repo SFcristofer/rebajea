@@ -57,14 +57,14 @@ h2{font-size:clamp(1.25rem,2.4vw,1.6rem);letter-spacing:-.03em;font-weight:700;m
 .card:hover .img img{transform:scale(1.07)}
 .body{padding:10px 6px 4px;display:flex;flex-direction:column;gap:4px;flex:1}
 .cat{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.68rem;color:var(--cyan);font-weight:600;text-transform:uppercase;letter-spacing:.08em}
-.card h3{font-size:.84rem;line-height:1.35;font-weight:500;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.price{margin-top:auto;padding-top:6px}
+.card h3{font-size:.84rem;line-height:1.35;min-height:2.7em;font-weight:500;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.price{padding-top:6px}
 .price strong{font-size:1.55rem;letter-spacing:-.03em;font-weight:700}
 .price s{color:var(--mut);font-size:.85rem;margin-left:6px}
-.price small{color:var(--mut)}
+.price small{color:var(--mut);font-size:.68rem;margin-left:3px}
 .badge.hot{background:#fbbf24}
 .trend{display:flex;align-items:center;gap:8px;font-size:.72rem;color:var(--cyan);min-height:18px}
-.go{margin-top:6px;font-size:.8rem;font-weight:600;color:var(--mut);transition:color .15s,transform .15s}
+.go{margin-top:auto;padding-top:6px;font-size:.8rem;font-weight:600;color:var(--mut);transition:color .15s,transform .15s}
 .card:hover .go{color:#fff;transform:translateX(3px)}
 .rail{position:relative}
 .nv{position:absolute;top:38%;z-index:5;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:rgba(14,15,24,.85);backdrop-filter:blur(8px);color:#fff;font-size:1.4rem;line-height:1;cursor:pointer;transition:background .15s}
@@ -133,3 +133,9 @@ footer{margin-top:88px;border-top:1px solid var(--line);color:var(--mut);padding
 .more{text-align:center;margin-top:26px}
 .fl{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:14px}.fl a{padding:4px 12px 4px 0}
 .chip.on{text-decoration:none}
+
+/* resultados de búsqueda */
+.sr{margin-top:34px}.cnt{color:var(--mut);font-size:.85rem;margin-bottom:14px}
+#so{-webkit-appearance:none;appearance:none;color-scheme:dark;background:var(--s1);padding-right:15px}
+.tools:has(#cf:empty){display:none}
+.trend:empty{display:none}

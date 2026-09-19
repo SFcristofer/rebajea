@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Buscar productos | Rebajea</title>
 <meta name="description" content="Busca ofertas en Mercado Libre México.">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://rebajea.online/buscar/">
 <meta name="robots" content="noindex, follow, max-image-preview:large">
 <meta property="og:type" content="website">
@@ -20,19 +21,25 @@
 </head>
 <body data-up="../">
 <header class="top"><div class="wrap nav">
-  <a class="logo" href="../">📉 Rebajea</a>
+  <a class="logo" href="../">
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: #00e57a; margin-right: 4px; vertical-align: bottom;"><path d="M6 21V3h7.5a5 5 0 0 1 0 10H6"/><path d="M10 13l8 8"/><path d="M18 15v6h-6"/></svg>
+    Rebajea
+  </a>
   <form class="sb" action="../buscar/" role="search"><input id="q" name="q" type="search" placeholder="Buscar productos…" aria-label="Buscar producto" autocomplete="off"><div id="sug" hidden></div></form>
   <nav class="tabs"><a href="../">Inicio</a><a href="../ofertas/">Ofertas</a><a href="../c/">Categorías</a><a href="../t/">Más buscados</a></nav>
 </div></header>
 <main>
-<section class="wrap"><h1 class="lh">Resultados para «<span id="rq"></span>»</h1>
+<section class="wrap"><h1 class="lh sr">Resultados para «<span id="rq"></span>»</h1>
+  <p class="cnt" id="cnt"></p>
+  <div class="tools"><div class="chips" id="cf"></div>
+  <select class="chip" id="so" aria-label="Ordenar"><option value="r">Más relevantes</option><option value="d">Mayor descuento</option><option value="a">Mayor ahorro en pesos</option><option value="p">Menor precio</option></select></div>
   <p class="none" id="none" hidden>No encontramos productos. Prueba con otra palabra o explora las <a class="all" href="../c/">categorías</a>.</p>
   <div class="grid" id="res"></div>
   <p class="more"><button class="chip" id="more" hidden>Ver más resultados</button></p></section>
 </main>
 <footer><div class="wrap">
   <nav class="fl"><a href="../">Inicio</a><a href="../ofertas/">Ofertas</a><a href="../c/">Categorías</a><a href="../t/">Más buscados</a></nav>
-  <p>Rebajea es un sitio independiente y no está afiliado a Mercado Libre. Como afiliado podemos recibir comisiones por compras elegibles. Los precios pueden cambiar; verifícalos en la tienda.</p>
+  <p>Rebajea es un rastreador independiente de ofertas. Los precios y la disponibilidad pueden variar rápidamente; por favor verifica el importe final en la página de la tienda antes de realizar tu compra.</p>
 </div></footer>
 <script src="../app.js" defer></script>
 </body>

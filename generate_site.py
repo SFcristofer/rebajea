@@ -17,10 +17,9 @@ FAQ = [
      "Es oferta lo que cuesta menos que su precio más alto registrado o que tiene una promoción "
      "activa en la tienda, sin importar el porcentaje."),
     ("¿Cuesta algo usar el sitio?",
-     "No. Es gratuito. Si compras desde nuestros enlaces, la tienda puede pagarnos una comisión "
-     "sin costo extra para ti."),
+     "No, es 100% gratuito para ti. Nuestro objetivo es ayudarte a ahorrar dinero en tus compras encontrando las verdaderas ofertas antes de que se agoten."),
     ("¿Los precios son definitivos?",
-     "Los precios cambian rápido. Confirma siempre el precio final en Mercado Libre antes de comprar."),
+     "Los precios y el stock cambian muy rápido. El precio final siempre será el que te muestre la tienda al momento de pagar."),
 ]
 
 
@@ -66,7 +65,7 @@ def load():
         ps = [h[0] for h in hist]
         tag = ""
         if len(ps) > 1 and ps[-1] < ps[-2] and hist[-1][1] == today:
-            tag = "Bajó hoy"
+            tag = f"Bajó ${ps[-2] - ps[-1]:,.0f} hoy"
         elif len(ps) > 1 and now == min(ps) and pct > 0:
             tag = "Mínimo histórico"
         elif pct > 0:
@@ -95,19 +94,19 @@ def spark(ps):
 
 def card(i):
     deal = i["pct"] >= config.MIN_DROP_PCT
-    badge = f'<span class="badge{" hot" if i["pct"] >= 30 else ""}">{"🔥 " if i["pct"] >= 30 else ""}-{i["pct"]:.0f}%</span>' if deal else ""
+    hot = i["pct"] >= 60  # el dorado/🔥 solo para las bajas grandes
+    badge = f'<span class="badge{" hot" if hot else ""}">{"🔥 " if hot else ""}-{i["pct"]:.0f}%</span>' if deal else ""
     old = f'<s>{money(i["top"])}</s>' if deal else ""
     save = f'<p class="save">Ahorras {money(i["top"] - i["now"])}</p>' if deal else ""
     bar = f'<div class="bar"><i style="width:{min(i["pct"], 100):.0f}%"></i></div>' if deal else ""
-    hot = i["pct"] >= 30
     trend = (f'<p class="trend">{spark(i["ps"])}<span>{i["tag"]}</span></p>' if i["tag"] or spark(i["ps"]) else "")
     img = (f'<img src="{escape(i["image"])}" alt="{escape(i["name"])}" width="300" height="225" loading="lazy">'
            if i["image"] else "")
     return f"""<a class="card{' hot' if hot else ''}" href="{escape(aff(i['link']))}" target="_blank" rel="sponsored noopener">
   {badge}<div class="img">{img}</div>
-  <div class="body"><span class="cat" title="{escape(i['cat'])}">{escape(i['cat'].split(',')[0])}</span>
+  <div class="body"><span class="cat" title="{escape(i['cat'])}">{escape(i['cat'])}</span>
   <h3>{escape(i['name'])}</h3>
-  <p class="price"><strong>{money(i['now'])}</strong> {old} <small>MXN</small></p>
+  <p class="price"><strong>{money(i['now'])}</strong><small>MXN</small> {old}</p>
   {bar}{save}{trend}
   <p class="rep">✓ {escape(i['rep'])}</p>
   <span class="go">Ver oferta →</span></div>
@@ -116,8 +115,8 @@ def card(i):
 
 PER_PAGE = 24
 TABS = [("Inicio", ""), ("Ofertas", "ofertas/"), ("Categorías", "c/"), ("Más buscados", "t/")]
-DISCLAIMER = ("es un sitio independiente y no está afiliado a Mercado Libre. Como afiliado podemos recibir "
-              "comisiones por compras elegibles. Los precios pueden cambiar; verifícalos en la tienda.")
+DISCLAIMER = ("es un rastreador independiente de ofertas. Los precios y la disponibilidad pueden variar rápidamente; "
+              "por favor verifica el importe final en la página de la tienda antes de realizar tu compra.")
 
 
 def rel(path):
@@ -137,6 +136,7 @@ def layout(path, title, desc, body, active="", ld=(), robots="index, follow", pr
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{escape(title)}</title>
 <meta name="description" content="{escape(desc)}">
+<link rel="icon" href="{up}icon.svg" type="image/svg+xml">
 <link rel="canonical" href="{url}">{links}
 <meta name="robots" content="{robots}, max-image-preview:large">
 <meta property="og:type" content="website">
@@ -152,7 +152,10 @@ def layout(path, title, desc, body, active="", ld=(), robots="index, follow", pr
 </head>
 <body data-up="{up}">
 <header class="top"><div class="wrap nav">
-  <a class="logo" href="{up}">📉 {config.SITE_NAME}</a>
+  <a class="logo" href="{up}">
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: #00e57a; margin-right: 4px; vertical-align: bottom;"><path d="M6 21V3h7.5a5 5 0 0 1 0 10H6"/><path d="M10 13l8 8"/><path d="M18 15v6h-6"/></svg>
+    {config.SITE_NAME}
+  </a>
   <form class="sb" action="{up}buscar/" role="search"><input id="q" name="q" type="search" placeholder="Buscar productos…" aria-label="Buscar producto" autocomplete="off"><div id="sug" hidden></div></form>
   <nav class="tabs">{tabs}</nav>
 </div></header>
@@ -266,8 +269,6 @@ def home(items, deals, lists):
   <div class="cta"><a class="btn big" href="ofertas/">Ver todas las ofertas</a><a class="ghost" href="#como-funciona">Cómo funciona</a></div>
 </div></section>
 {rail("Las mayores bajas", deals[:16], '<a class="all" href="ofertas/">Ver todas →</a>')}
-{rails}
-<section class="wrap"><h2>Explora por categoría</h2><div class="chips wrapc"><a class="chip on" href="c/">Todas las categorías</a>{explore}</div></section>
 <section id="como-funciona" class="wrap how">
   <h2>Cómo funciona</h2>
   <ol>
@@ -276,12 +277,17 @@ def home(items, deals, lists):
     <li><strong>Publicamos</strong>Solo lo que cuesta menos que antes.</li>
   </ol>
 </section>
+{rails}
+<section class="wrap"><h2>Explora por categoría</h2><div class="chips wrapc"><a class="chip on" href="c/">Todas las categorías</a>{explore}</div></section>
 <section id="faq" class="wrap"><h2>Preguntas frecuentes</h2>{faq}</section>"""
     return layout("", title, desc, body, "Inicio", ld)
 
 
 def search_page():
-    body = """<section class="wrap"><h1 class="lh">Resultados para «<span id="rq"></span>»</h1>
+    body = """<section class="wrap"><h1 class="lh sr">Resultados para «<span id="rq"></span>»</h1>
+  <p class="cnt" id="cnt"></p>
+  <div class="tools"><div class="chips" id="cf"></div>
+  <select class="chip" id="so" aria-label="Ordenar"><option value="r">Más relevantes</option><option value="d">Mayor descuento</option><option value="a">Mayor ahorro en pesos</option><option value="p">Menor precio</option></select></div>
   <p class="none" id="none" hidden>No encontramos productos. Prueba con otra palabra o explora las <a class="all" href="../c/">categorías</a>.</p>
   <div class="grid" id="res"></div>
   <p class="more"><button class="chip" id="more" hidden>Ver más resultados</button></p></section>"""
@@ -339,7 +345,7 @@ def build(items):
 
 def search_index(items):
     return [dict(n=i["name"], c=i["cat"], p=round(i["now"]), t=round(i["top"]), d=round(i["pct"], 1),
-                 l=aff(i["link"]), i=i["image"] or "", r=i["rep"]) for i in items]
+                 l=aff(i["link"]), i=i["image"] or "", r=i["rep"], g=i["tag"]) for i in items]
 
 
 def main():
@@ -356,6 +362,10 @@ def main():
         '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
         + "".join(f"<url><loc>{config.SITE_URL}/{p}</loc><lastmod>{date.today().isoformat()}</lastmod>"
                   "<changefreq>daily</changefreq></url>" for p in pages if p != "buscar/") + "</urlset>\n")
+    (out / "icon.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#00e57a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V3h7.5a5 5 0 0 1 0 10H6"/><path d="M10 13l8 8"/><path d="M18 15v6h-6"/></svg>',
+        encoding="utf-8"
+    )
     print(f"Sitio generado en {out}: {len(pages)} páginas")
 
 
