@@ -7,7 +7,7 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 350
     env:
       ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
       ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}

@@ -12,14 +12,9 @@ OUT_DIR = BASE_DIR / "docs"
 
 SITE = "MLM"  # Mercado Libre México
 
-# Categorías a vigilar (los más vendidos de cada una). Ver: sites/MLM/categories
-CATEGORIES = {
-    "MLM1000": "Electrónica, Audio y Video",
-    "MLM1051": "Celulares y Teléfonos",
-    "MLM1648": "Computación",
-    "MLM1574": "Hogar, Muebles y Jardín",
-    "MLM1144": "Consolas y Videojuegos",
-}
+# Se vigilan todas las categorías de ML México (main.py las lee de la API), salvo las que no son productos
+EXCLUDED_CATEGORIES = {"MLM1743", "MLM1459", "MLM1540"}  # Autos y motos, Inmuebles, Servicios
+MAX_RUN_MINUTES = 300        # tope de main.py; al alcanzarlo termina y se publica lo avanzado
 
 SEARCHES = ["smart tv 32 pulgadas", "smart tv 40 pulgadas", "smart tv 43 pulgadas", "smart tv 50 pulgadas", "smart tv 55 pulgadas",
             "laptop hp 15.6", "laptop lenovo", "laptop asus", "audifonos bluetooth inalambricos", "audifonos tws", "lavadora automatica 19 kg", "refrigerador 2 puertas", "consola playstation 5", "consola xbox series", "nintendo switch"]  # búsquedas por texto extra
