@@ -116,7 +116,9 @@ def card(i):
 PER_PAGE = 24
 TABS = [("Inicio", ""), ("Ofertas", "ofertas/"), ("Categorías", "c/"), ("Más buscados", "t/")]
 DISCLAIMER = ("es un rastreador independiente de ofertas. Los precios y la disponibilidad pueden variar rápidamente; "
-              "por favor verifica el importe final en la página de la tienda antes de realizar tu compra.")
+              "por favor verifica el importe final en la página de la tienda antes de realizar tu compra. "
+              "Como afiliado de Mercado Libre, podemos recibir una comisión por compras calificadas, sin costo extra para ti.")
+LEGAL = [("Privacidad", "privacidad/"), ("Términos", "terminos/")]
 
 
 def rel(path):
@@ -165,6 +167,7 @@ def layout(path, title, desc, body, active="", ld=(), robots="index, follow", pr
 <footer><div class="wrap">
   <nav class="fl">{tabs}</nav>
   <p>{config.SITE_NAME} {DISCLAIMER}</p>
+  <p>{" · ".join(f'<a href="{up}{p}">{n}</a>' for n, p in LEGAL)}</p>
 </div></footer>
 <script src="{up}app.js" defer></script>
 </body>
@@ -294,6 +297,44 @@ def search_page():
     return layout("buscar/", f"Buscar productos | {config.SITE_NAME}", "Busca ofertas en Mercado Libre México.", body, robots="noindex, follow")
 
 
+def legal_pages():
+    n, u = config.SITE_NAME, config.SITE_URL
+    mail = (f' Para ejercer tus derechos de acceso, rectificación, cancelación u oposición (ARCO), escríbenos a '
+            f'<a href="mailto:{config.CONTACT_EMAIL}">{config.CONTACT_EMAIL}</a>.') if config.CONTACT_EMAIL else ""
+    contact = f"<p>Contacto:{mail}</p>" if mail else ""
+    priv = f"""<h2>Datos que recogemos</h2>
+<p>{n} ({u}) no tiene cuentas, formularios ni registro: <strong>no recogemos ni almacenamos datos personales</strong>.
+Lo que escribes en el buscador se procesa únicamente en tu navegador y no se envía a ningún servidor nuestro.</p>
+<h2>Cookies y analítica</h2>
+<p>El sitio no usa cookies propias, de publicidad ni de seguimiento, ni herramientas de analítica.</p>
+<h2>Servicios de terceros</h2>
+<p>El sitio se aloja en GitHub Pages, que puede registrar datos técnicos de conexión (como la dirección IP) según su
+<a href="https://docs.github.com/es/site-policy/privacy-policies/github-general-privacy-statement" rel="noopener">política de privacidad</a>.
+Las imágenes de los productos se cargan desde los servidores de Mercado Libre. Al hacer clic en una oferta sales a
+mercadolibre.com.mx, que tiene su propio aviso de privacidad y puede colocar sus cookies; además, el enlace lleva un identificador de afiliado.</p>
+<h2>Cambios</h2>
+<p>Si esto cambia (por ejemplo, si añadimos analítica o alertas), actualizaremos esta página. Última actualización: {date.today().isoformat()}.</p>{contact}"""
+    terms = f"""<h2>Qué es {n}</h2>
+<p>{n} es un sitio independiente que rastrea precios públicos de Mercado Libre México y muestra bajas de precio frente a su historial.
+No vendemos productos ni procesamos pagos; la compra se realiza siempre en Mercado Libre. No estamos afiliados ni respaldados por Mercado Libre, más allá de participar en su programa de afiliados.</p>
+<h2>Divulgación de afiliados</h2>
+<p>Los enlaces a productos son enlaces de afiliado: si compras tras hacer clic, podemos recibir una comisión de Mercado Libre <strong>sin costo adicional para ti</strong>.
+Esto no influye en el precio que pagas.</p>
+<h2>Precios e información</h2>
+<p>Los precios, descuentos y disponibilidad provienen de la API de Mercado Libre y pueden cambiar en cualquier momento, o contener errores.
+El precio y las condiciones válidos son los que aparecen en Mercado Libre al momento de comprar. Solo mostramos vendedores con buena reputación, pero no garantizamos la calidad de ningún producto ni vendedor.</p>
+<h2>Responsabilidad</h2>
+<p>El sitio se ofrece «tal cual», sin garantías. No somos responsables de decisiones de compra ni de pérdidas derivadas del uso de la información publicada.
+Las marcas y nombres pertenecen a sus respectivos dueños.</p>
+<h2>Cambios y ley aplicable</h2>
+<p>Podemos modificar estos términos en cualquier momento. Se rigen por las leyes de México. Última actualización: {date.today().isoformat()}.</p>{contact}"""
+    out = {}
+    for path, name, body in (("privacidad/", "Aviso de privacidad", priv), ("terminos/", "Términos y condiciones", terms)):
+        html = f'<section class="wrap legal"><h1 class="lh sr">{name}</h1>{body}</section>'
+        out[path] = layout(path, f"{name} | {n}", f"{name} de {n}, rastreador de ofertas de Mercado Libre México.", html)
+    return out
+
+
 def build_listings(items):
     """Devuelve [(ruta, nombre, tipo, items)] con al menos 3 productos."""
     out = []
@@ -313,7 +354,7 @@ def build(items):
     today = date.today().isoformat()
     deals = [i for i in items if i["pct"] >= config.MIN_DROP_PCT]
     lists = build_listings(items)
-    pages = {"": home(items, deals, lists), "buscar/": search_page()}
+    pages = {"": home(items, deals, lists), "buscar/": search_page(), **legal_pages()}
     lo = lambda s: money(min(i["now"] for i in s))
     pages.update(paged(
         "ofertas/", "Ofertas", [(config.SITE_NAME, ""), ("Ofertas", "ofertas/")],

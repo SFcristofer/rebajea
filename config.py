@@ -7,6 +7,7 @@ DB_PATH = BASE_DIR / "prices.db"
 
 SITE_NAME = "Rebajea"
 SITE_URL = "https://rebajea.online"
+CONTACT_EMAIL = ""  # correo público de contacto para las páginas legales (derechos ARCO); vacío = no se muestra
 OUT_DIR = BASE_DIR / "docs"
 
 SITE = "MLM"  # Mercado Libre México

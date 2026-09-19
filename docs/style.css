@@ -139,3 +139,4 @@ footer{margin-top:88px;border-top:1px solid var(--line);color:var(--mut);padding
 #so{-webkit-appearance:none;appearance:none;color-scheme:dark;background:var(--s1);padding-right:15px}
 .tools:has(#cf:empty){display:none}
 .trend:empty{display:none}
+.legal{max-width:760px}.legal h2{margin:26px 0 8px;font-size:1.15rem}.legal p{color:var(--mut)}.legal a,footer p a{color:var(--cyan)}footer p{margin-top:8px}
