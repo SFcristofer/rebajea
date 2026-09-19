@@ -127,7 +127,7 @@ footer{margin-top:88px;border-top:1px solid var(--line);color:var(--mut);padding
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
 .tile{display:flex;flex-direction:column;gap:2px;text-decoration:none;background:var(--s1);border:1px solid var(--line);border-radius:var(--r);padding:10px;transition:transform .25s,border-color .25s,background .25s}
 .tile:hover{transform:translateY(-3px);border-color:rgba(124,92,255,.5);background:var(--s2)}
-.ti{display:flex;align-items:center;justify-content:center;background:#e4e6ee;border-radius:12px;aspect-ratio:16/9;margin-bottom:8px}
+.ti{display:flex;align-items:center;justify-content:center;background:#e4e6ee;border-radius:12px;height:150px;margin-bottom:8px}
 .ti img{max-width:80%;max-height:88%;object-fit:contain;mix-blend-mode:multiply}
 .tile strong{font-size:.95rem;font-weight:600}.tile small{color:var(--mut)}
 .more{text-align:center;margin-top:26px}

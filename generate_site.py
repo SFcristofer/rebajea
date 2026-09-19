@@ -25,6 +25,9 @@ FAQ = [
 
 # páginas de búsqueda específica: (título, regex sobre el nombre); se ordenan por precio
 TV = r"(?i)^(?=.*(tv|televisi|pantalla)).*\b%s\b"
+ACCESORIO = (r"(?i)\b(soporte|base|cable|antena|control remoto|funda|protector|regulador|cargador|adaptador|"
+             r"refacci[oó]n|repuesto|mica|manguera|kit|carcasa|estuche|riel|brazo|tornillos?|empaque|voltaje|hdmi|vga|hub|pila|celular|tel[eé]fono|teclado|mouse|bocina|aud[ií]fonos? gamer)\b")
+HEAD_ONLY = {"Laptops", "Lavadoras", "Refrigeradores", "Consolas de videojuegos"}
 TOPICS = [
     ("Smart TV y pantallas de 32 pulgadas", TV % 32),
     ("Smart TV y pantallas de 40 pulgadas", TV % 40),
@@ -232,11 +235,13 @@ def paged(base, active, trail, title, desc, h1, lead, items, after=""):
 def hub(path, active, name, h1, lead, entries):
     """Índice de categorías o temas: entries = [(nombre, ruta, items)]."""
     up = rel(path)
-    thumb = lambda i: f'<img src="{escape(i["image"])}" alt="" loading="lazy">' if i["image"] else ""
-    tiles = "".join(
-        f'<a class="tile" href="{up}{p}"><span class="ti">{thumb(s[0])}</span>'
-        f'<strong>{escape(n)}</strong><small>{len(s)} ofertas · desde {money(min(i["now"] for i in s))}</small></a>'
-        for n, p, s in entries)
+    def tile(n, p, s):
+        top = max((i for i in s if i["image"]), key=lambda i: i["pct"], default=None)  # portada: el de mayor descuento
+        img = f'<img src="{escape(top["image"])}" alt="" loading="lazy">' if top else ""
+        up_to = f' · hasta -{top["pct"]:.0f}%' if top and top["pct"] >= 1 else ""
+        return (f'<a class="tile" href="{up}{p}"><span class="ti">{img}</span><strong>{escape(n)}</strong>'
+                f'<small>{len(s)} ofertas · desde {money(min(i["now"] for i in s))}{up_to}</small></a>')
+    tiles = "".join(tile(*e) for e in sorted(entries, key=lambda e: -len(e[2])))
     crumb_html, crumb_ld = crumbs([(config.SITE_NAME, ""), (name, path)])
     body = f'<section class="wrap">{crumb_html}<h1 class="lh">{escape(h1)}</h1><p class="lead lh">{lead}</p><div class="tiles">{tiles}</div></section>'
     return layout(path, f"{h1} | {config.SITE_NAME}", lead, body, active, [crumb_ld])
@@ -343,8 +348,13 @@ def build_listings(items):
         if len(sel) >= 3:
             out.append((f"c/{slug(c)}/", c, "c", sel))
     for name, rx in TOPICS:
-        sel = sorted((i for i in items if re.search(rx, i["name"])), key=lambda i: i["now"])
-        if len(sel) >= 3:
+        head = 28 if name in HEAD_ONLY else None  # el producto nombra su tipo al inicio; "cable para laptop" no cuenta
+        sel = [i for i in items if re.search(rx, i["name"][:head]) and not re.search(ACCESORIO, i["name"])]
+        if sel:  # piso de precio: lo que cuesta < 30% de la mediana suele ser refacción o accesorio
+            floor = 0.3 * sorted(i["now"] for i in sel)[len(sel) // 2]
+            sel = [i for i in sel if i["now"] >= floor]
+        sel.sort(key=lambda i: i["now"])
+        if len(sel) >= 5:
             out.append((f"t/{slug(name)}/", name, "t", sel))
     return out
 
@@ -367,7 +377,7 @@ def build(items):
             ("c", "Categorías", "Categorías", "Ofertas por categoría",
              "Elige una categoría para ver sus mejores ofertas en Mercado Libre México, con vendedores confiables y precios verificados."),
             ("t", "Más buscados", "Más buscados", "Lo más buscado en Mercado Libre",
-             "Pantallas, laptops, audífonos, electrodomésticos y consolas: las opciones más baratas, ordenadas de menor a mayor precio.")):
+             "Pantallas, laptops, audífonos, electrodomésticos y consolas: las categorías con más ofertas hoy en Mercado Libre, con vendedores confiables y precios verificados.")):
         pages[f"{kind}/"] = hub(f"{kind}/", tab, name, h1, lead, [(n, p, s) for p, n, k, s in lists if k == kind])
     for path, name, kind, sel in lists:
         tab, hubname = ("Categorías", "Categorías") if kind == "c" else ("Más buscados", "Más buscados")
