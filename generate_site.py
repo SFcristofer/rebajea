@@ -274,7 +274,11 @@ def home(items, deals, lists):
   <p class="eyebrow"><span class="dot"></span> Mercado Libre México · {len(items)} productos vigilados · Actualizado {today}</p>
   <h1>Compra más barato.<br><em>Solo ofertas reales.</em></h1>
   <p class="lead">Rastreamos los precios más vendidos y mostramos únicamente lo que de verdad bajó, comparado con su historial.</p>
-  <div class="cta"><a class="btn big" href="ofertas/">Ver todas las ofertas</a><a class="ghost" href="#como-funciona">Cómo funciona</a></div>
+  <div class="cta">
+    <a class="btn big" href="ofertas/">Ver todas las ofertas</a>
+    <a class="ghost" href="#como-funciona">Cómo funciona</a>
+    <a class="btn" href="#" onclick="document.getElementById('wa-modal').style.display='flex'; return false;">📱 Únete a WhatsApp</a>
+  </div>
 </div></section>
 {rail("Las mayores bajas", deals[:16], '<a class="all" href="ofertas/">Ver todas →</a>')}
 <section id="como-funciona" class="wrap how">
@@ -287,7 +291,25 @@ def home(items, deals, lists):
 </section>
 {rails}
 <section class="wrap"><h2>Explora por categoría</h2><div class="chips wrapc"><a class="chip on" href="c/">Todas las categorías</a>{explore}</div></section>
-<section id="faq" class="wrap"><h2>Preguntas frecuentes</h2>{faq}</section>"""
+<section id="faq" class="wrap"><h2>Preguntas frecuentes</h2>{faq}</section>
+
+<div id="wa-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); align-items: center; justify-content: center; z-index: 9999; backdrop-filter: blur(5px); opacity: 0; animation: fadeIn 0.3s forwards;">
+  <div style="background: #0f111a; padding: 2.5rem 2rem; border-radius: 16px; max-width: 420px; width: 90%; text-align: center; border: 1px solid #2a2d3e; box-shadow: 0 20px 40px rgba(0,0,0,0.6); transform: translateY(20px); animation: slideUp 0.3s forwards ease-out;">
+    <div style="font-size: 3rem; margin-bottom: 1rem;">📱</div>
+    <h3 style="margin: 0 0 1rem 0; color: #fff; font-size: 1.5rem;">¡Próximamente!</h3>
+    <p style="color: #a0a5b5; line-height: 1.6; margin: 0 0 2rem 0; font-size: 1.05rem;">
+      ¡Gracias por tu interés! Estamos trabajando arduamente para crear este servicio y enviarte las mejores ofertas directamente a tu WhatsApp.
+    </p>
+    <button onclick="document.getElementById('wa-modal').style.display='none'" style="background: #00e57a; color: #07080d; border: none; padding: 1rem 2rem; border-radius: 8px; font-weight: bold; font-size: 1rem; cursor: pointer; width: 100%; transition: opacity 0.2s;">
+      Entendido
+    </button>
+  </div>
+</div>
+<style>
+  @keyframes fadeIn {{ to {{ opacity: 1; }} }}
+  @keyframes slideUp {{ to {{ transform: translateY(0); }} }}
+</style>
+"""
     return layout("", title, desc, body, "Inicio", ld)
 
 
