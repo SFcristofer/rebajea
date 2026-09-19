@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+concurrency: update
 jobs:
   update:
     runs-on: ubuntu-latest
@@ -23,4 +24,7 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@users.noreply.github.com"
           git add prices.db docs
-          git diff --cached --quiet || git commit -m "Actualización diaria" && git push
+          git diff --cached --quiet && exit 0
+          git commit -m "Actualización diaria"
+          git pull --rebase -X theirs
+          git push
