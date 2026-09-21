@@ -135,6 +135,11 @@ def rel(path):
     return "../" * path.count("/")
 
 
+def stats_tag():
+    c = config.GOATCOUNTER
+    return f'<script data-goatcounter="https://{c}.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>' if c else ""
+
+
 def layout(path, title, desc, body, active="", ld=(), robots="index, follow", prev=None, nxt=None):
     """Envoltorio común: head SEO, navbar con buscador y pestañas, footer y scripts."""
     up, url = rel(path), f"{config.SITE_URL}/{path}"
@@ -181,7 +186,7 @@ def layout(path, title, desc, body, active="", ld=(), robots="index, follow", pr
   <p>{" · ".join(f'<a href="{up}{p}">{n}</a>' for n, p in LEGAL)}</p>
 </div></footer>
 <script src="{up}app.js" defer></script>
-</body>
+{stats_tag()}</body>
 </html>"""
 
 
@@ -349,7 +354,7 @@ def legal_pages():
 <p>{n} ({u}) no tiene cuentas, formularios ni registro: <strong>no recogemos ni almacenamos datos personales</strong>.
 Lo que escribes en el buscador se procesa únicamente en tu navegador y no se envía a ningún servidor nuestro.</p>
 <h2>Cookies y analítica</h2>
-<p>El sitio no usa cookies propias, de publicidad ni de seguimiento, ni herramientas de analítica.</p>
+<p>El sitio no usa cookies propias ni de publicidad. {"Para contar visitas usamos GoatCounter, una analítica sin cookies que no identifica a las personas ni las sigue entre sitios; solo cuenta páginas vistas, país y tipo de dispositivo." if config.GOATCOUNTER else "No usa herramientas de analítica."}</p>
 <h2>Servicios de terceros</h2>
 <p>El sitio se aloja en GitHub Pages, que puede registrar datos técnicos de conexión (como la dirección IP) según su
 <a href="https://docs.github.com/es/site-policy/privacy-policies/github-general-privacy-statement" rel="noopener">política de privacidad</a>.
