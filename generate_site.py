@@ -10,6 +10,7 @@ from html import escape
 from urllib.parse import urlencode
 
 import config
+import db
 
 FAQ = [
     ("¿Cómo detectan las ofertas?",
@@ -49,6 +50,7 @@ def slug(s):
 
 def load():
     conn = sqlite3.connect(sys.argv[1] if len(sys.argv) > 1 else config.DB_PATH)
+    db.migrate(conn)  # una base anterior puede no tener columnas nuevas
     rows = conn.execute(
         """SELECT p.name, p.link, p.category, p.image, p.id,
                   (SELECT price FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1),
