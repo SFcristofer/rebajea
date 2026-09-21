@@ -34,3 +34,16 @@ if(res){const term=new URLSearchParams(location.search).get('q')||'';q.value=ter
 // flechas de los carruseles
 document.querySelectorAll('.rail').forEach(r=>{const f=r.querySelector('.feat');
  r.querySelectorAll('.nv').forEach(b=>b.onclick=()=>f.scrollBy({left:(b.classList.contains('l')?-1:1)*f.clientWidth*.8,behavior:'smooth'}))});
+// cuenta regresiva a la próxima actualización (status.json lo genera generate_site.py)
+(()=>{const u=$('#upd');if(!u)return;let s,k=0;
+ const set=j=>{s={n:new Date(j.next),u:new Date(j.updated)};u.hidden=false;tick()};
+ const load=()=>fetch(up+'status.json',{cache:'no-store'}).then(r=>r.json()).then(j=>{sessionStorage.upd=JSON.stringify(j);set(j)}).catch(()=>{});
+ const p=n=>String(n).padStart(2,'0');
+ const tick=()=>{const d=Math.round((s.n-Date.now())/1e3),m=Math.round((Date.now()-s.u)/6e4);
+  if(d<=0){u.className='upd go';u.innerHTML='<span class="lv"><i></i>EN VIVO</span><span class="tx">Actualizando precios… vuelve en unos minutos</span>';if(++k%60==0)load();return}
+  const pc=Math.min(100,Math.max(0,(Date.now()-s.u)/(s.n-s.u)*100));
+  u.className='upd';u.innerHTML='<span class="lv"><i></i>EN VIVO</span><span class="tx">Próxima actualización de precios en</span>'+
+   '<span class="dg"><b>'+p(Math.floor(d/3600))+'</b><em>:</em><b>'+p(Math.floor(d%3600/60))+'</b><em>:</em><b>'+p(d%60)+'</b></span>'+
+   '<span class="ag">Actualizado hace '+(m<60?m+' min':Math.floor(m/60)+' h')+'</span><div class="pg"><u style="width:'+pc+'%"></u></div>'};
+ try{set(JSON.parse(sessionStorage.upd))}catch(e){}
+ load();setInterval(()=>s&&tick(),1e3)})();

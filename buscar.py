@@ -20,7 +20,7 @@ for q in sys.argv[1:] or config.SEARCHES:
             db.save_product(conn, info, q.title())
         found = ml.best_price(pid)
         if found:
-            db.save_price(conn, pid, *found)
+            db.save_price(conn, pid, *found[:4])
             n += 1
     conn.commit()
     print(f"{q}: {n} productos")

@@ -14,7 +14,8 @@ SITE = "MLM"  # Mercado Libre México
 
 # Se vigilan todas las categorías de ML México (main.py las lee de la API), salvo las que no son productos
 EXCLUDED_CATEGORIES = {"MLM1743", "MLM1459", "MLM1540"}  # Autos y motos, Inmuebles, Servicios
-MAX_RUN_MINUTES = 300        # tope de main.py; al alcanzarlo termina y se publica lo avanzado
+MAX_RUN_MINUTES = int(os.environ.get("MAX_RUN_MINUTES", 300))  # tope de main.py; al alcanzarlo termina y se publica lo avanzado
+RUN_HOURS_UTC = (0, 4, 12, 16, 20)  # horas de las corridas (cron de update.yml): 6, 10, 14, 18 y 22 h en México
 
 SEARCHES = ["smart tv 32 pulgadas", "smart tv 40 pulgadas", "smart tv 43 pulgadas", "smart tv 50 pulgadas", "smart tv 55 pulgadas",
             "laptop hp 15.6", "laptop lenovo", "laptop asus", "audifonos bluetooth inalambricos", "audifonos tws", "lavadora automatica 19 kg", "refrigerador 2 puertas", "consola playstation 5", "consola xbox series", "nintendo switch"]  # búsquedas por texto extra

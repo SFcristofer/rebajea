@@ -1,4 +1,5 @@
 """Cliente mínimo de la API oficial de Mercado Libre."""
+import re
 import time
 
 import requests
@@ -6,6 +7,7 @@ import requests
 import config
 
 API = "https://api.mercadolibre.com"
+OFFER_PAGES = ("https://www.mercadolibre.com.mx/ofertas?promotion_type=lightning", "https://www.mercadolibre.com.mx/ofertas")
 
 
 class MercadoLibre:
@@ -14,6 +16,7 @@ class MercadoLibre:
         self._token = None
         self._expires = 0.0
         self._reps = {}
+        self._paths = {}
 
     def _auth(self):
         if self._token and time.time() < self._expires - 60:
@@ -57,6 +60,29 @@ class MercadoLibre:
         ids = [c["id"] for c in data.get("content", []) if c.get("type") == "PRODUCT"]
         return ids[:limit]
 
+    def deal_products(self, pages=6):
+        """IDs de producto de las páginas públicas de ofertas (relámpago primero); la API no lista promociones."""
+        ids = []
+        for url in OFFER_PAGES:
+            for n in range(1, pages + 1):
+                time.sleep(1)
+                try:
+                    r = self.session.get(url, params={"page": n}, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+                except requests.RequestException:
+                    break
+                found = re.findall(r"/p/(MLM\d+)\?pdp_filters=deal", r.text) if r.status_code == 200 else []
+                if not found:
+                    break
+                ids += found
+        return list(dict.fromkeys(ids))
+
+    def category_path(self, category_id):
+        """[(id, nombre)] de la raíz a la hoja."""
+        if category_id not in self._paths:
+            data = self.get(f"categories/{category_id}") or {}
+            self._paths[category_id] = [(c["id"], c["name"]) for c in data.get("path_from_root", [])]
+        return self._paths[category_id]
+
     def product(self, product_id):
         data = self.get(f"products/{product_id}")
         if not data:
@@ -84,7 +110,7 @@ class MercadoLibre:
         return self._reps[seller_id]
 
     def best_price(self, product_id):
-        """(precio, original, reputación) de la oferta nueva más barata de un vendedor confiable; original es None sin promoción."""
+        """(precio, original, reputación, is_flash, categoría) de la oferta nueva más barata de un vendedor confiable."""
         data = self.get(f"products/{product_id}/items", limit=50)
         if not data:
             return None
@@ -95,5 +121,7 @@ class MercadoLibre:
             rep = "Tienda oficial" if best.get("official_store_id") else self.seller_rep(best["seller_id"])
             if rep:
                 orig = best.get("original_price")
-                return best["price"], (orig if orig and orig > best["price"] else None), rep
+                tags = best.get("tags", [])
+                is_flash = "deal_of_the_day" in tags or "lightning_deal" in tags
+                return best["price"], (orig if orig and orig > best["price"] else None), rep, is_flash, best.get("category_id")
         return None

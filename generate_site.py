@@ -4,7 +4,7 @@ import re
 import unicodedata
 import sqlite3
 import sys
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from collections import Counter
 from html import escape
 from urllib.parse import urlencode
@@ -54,12 +54,13 @@ def load():
                   (SELECT price FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1),
                   (SELECT rep FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1),
                   MAX((SELECT MAX(price) FROM prices WHERE product_id=p.id),
-                      COALESCE((SELECT orig FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1), 0))
+                      COALESCE((SELECT orig FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1), 0)),
+                  (SELECT is_flash FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1)
            FROM products p"""
     ).fetchall()
     items = []
     today = date.today().isoformat()
-    for name, link, cat, image, pid, now, rep, top in rows:
+    for name, link, cat, image, pid, now, rep, top, is_flash in rows:
         if now is None or not rep:  # sin vendedor confiable verificado no se publica
             continue
         pct = (top - now) / top * 100 if top else 0
@@ -73,7 +74,7 @@ def load():
             tag = "Mínimo histórico"
         elif pct > 0:
             tag = "En promoción"
-        items.append(dict(name=name, link=link, cat=cat, image=image, rep=rep, now=now, top=top, pct=pct, ps=ps, tag=tag))
+        items.append(dict(name=name, link=link, cat=cat, image=image, rep=rep, now=now, top=top, pct=pct, ps=ps, tag=tag, is_flash=bool(is_flash)))
     items.sort(key=lambda i: (-i["pct"], i["now"]))  # mejor promoción primero; a igualdad, el más barato
     return items
 
@@ -97,15 +98,18 @@ def spark(ps):
 
 def card(i):
     deal = i["pct"] >= config.MIN_DROP_PCT
-    hot = i["pct"] >= 60  # el dorado/🔥 solo para las bajas grandes
-    badge = f'<span class="badge{" hot" if hot else ""}">{"🔥 " if hot else ""}-{i["pct"]:.0f}%</span>' if deal else ""
+    flash = i.get("is_flash")
+    hot = i["pct"] >= 60 and not flash
+    cls = " flash" if flash else (" hot" if hot else "")
+    txt = "⚡ " if flash else ("🔥 " if hot else "")
+    badge = f'<span class="badge{cls}">{txt}-{i["pct"]:.0f}%</span>' if deal else ""
     old = f'<s>{money(i["top"])}</s>' if deal else ""
     save = f'<p class="save">Ahorras {money(i["top"] - i["now"])}</p>' if deal else ""
     bar = f'<div class="bar"><i style="width:{min(i["pct"], 100):.0f}%"></i></div>' if deal else ""
     trend = (f'<p class="trend">{spark(i["ps"])}<span>{i["tag"]}</span></p>' if i["tag"] or spark(i["ps"]) else "")
     img = (f'<img src="{escape(i["image"])}" alt="{escape(i["name"])}" width="300" height="225" loading="lazy">'
            if i["image"] else "")
-    return f"""<a class="card{' hot' if hot else ''}" href="{escape(aff(i['link']))}" target="_blank" rel="sponsored noopener">
+    return f"""<a class="card{cls}" href="{escape(aff(i['link']))}" target="_blank" rel="sponsored noopener">
   {badge}<div class="img">{img}</div>
   <div class="body"><span class="cat" title="{escape(i['cat'])}">{escape(i['cat'])}</span>
   <h3>{escape(i['name'])}</h3>
@@ -117,7 +121,7 @@ def card(i):
 
 
 PER_PAGE = 24
-TABS = [("Inicio", ""), ("Ofertas", "ofertas/"), ("Categorías", "c/"), ("Más buscados", "t/")]
+TABS = [("Inicio", ""), ("Relámpago", "relampago/"), ("Ofertas", "ofertas/"), ("Categorías", "c/"), ("Más buscados", "t/")]
 DISCLAIMER = ("es un rastreador independiente de ofertas. Los precios y la disponibilidad pueden variar rápidamente; "
               "por favor verifica el importe final en la página de la tienda antes de realizar tu compra. "
               "Como afiliado de Mercado Libre, podemos recibir una comisión por compras calificadas, sin costo extra para ti.")
@@ -142,6 +146,7 @@ def layout(path, title, desc, body, active="", ld=(), robots="index, follow", pr
 <title>{escape(title)}</title>
 <meta name="description" content="{escape(desc)}">
 <link rel="icon" href="{up}icon.svg" type="image/svg+xml">
+<link rel="manifest" href="{up}manifest.json">
 <link rel="canonical" href="{url}">{links}
 <meta name="robots" content="{robots}, max-image-preview:large">
 <meta property="og:type" content="website">
@@ -164,6 +169,7 @@ def layout(path, title, desc, body, active="", ld=(), robots="index, follow", pr
   <form class="sb" action="{up}buscar/" role="search"><input id="q" name="q" type="search" placeholder="Buscar productos…" aria-label="Buscar producto" autocomplete="off"><div id="sug" hidden></div></form>
   <nav class="tabs">{tabs}</nav>
 </div></header>
+<div class="upd" id="upd" hidden></div>
 <main>
 {body}
 </main>
@@ -211,7 +217,7 @@ def pager(base, n, total):
     return f'<nav class="pager" aria-label="Paginación">{p}{"".join(out)}{x}</nav>'
 
 
-def paged(base, active, trail, title, desc, h1, lead, items, after=""):
+def paged(base, active, trail, title, desc, h1, lead, items, after="", robots="index, follow"):
     """Genera una página estática por cada PER_PAGE productos: base, base+'2/', base+'3/'…  → {ruta: html}."""
     total = max(1, -(-len(items) // PER_PAGE))
     out = {}
@@ -227,7 +233,7 @@ def paged(base, active, trail, title, desc, h1, lead, items, after=""):
   {pager(base, n, total)}</section>{after}"""
         out[path] = layout(path, f"{title}{suffix} | {config.SITE_NAME}", desc + (f" Página {n} de {total}." if n > 1 else ""),
                            body, active, [crumb_ld, item_ld(chunk, (n - 1) * PER_PAGE + 1)],
-                           prev=None if n == 1 else (base if n == 2 else f"{base}{n - 1}/"),
+                           robots=robots, prev=None if n == 1 else (base if n == 2 else f"{base}{n - 1}/"),
                            nxt=None if n == total else f"{base}{n + 1}/")
     return out
 
@@ -266,20 +272,28 @@ def home(items, deals, lists):
         f'<section class="wrap"><div class="sh"><h2>{h}</h2>{more}</div>'
         '<div class="rail"><button class="nv l" aria-label="Anterior">‹</button><button class="nv r" aria-label="Siguiente">›</button>'
         f'<div class="grid feat">{"".join(card(i) for i in its)}</div></div></section>')
+    
+    flash_deals = [d for d in deals if d.get("is_flash")]
+    flash_rail = rail("⚡ Ofertas Relámpago", flash_deals[:16], '<a class="all" href="relampago/">Ver todas →</a>') if flash_deals else ""
+    
     rails = "".join(rail(f"Lo mejor en {escape(c)}", [d for d in deals if d["cat"] == c][:15],
                          f'<a class="all" href="{cpath[c]}">Ver todo →</a>' if c in cpath else "") for c in cats)
     explore = "".join(f'<a class="chip" href="{p}">{escape(n)}</a>' for p, n, k, _ in lists if k == "t")
+    explore_sec = f'<section class="wrap"><h2>Explora por categoría</h2><div class="chips wrapc"><a class="chip on" href="c/">Todas las categorías</a>{explore}</div></section>'
     faq = "".join(f"<details><summary>{escape(q)}</summary><p>{escape(a)}</p></details>" for q, a in FAQ)
     body = f"""<section class="hero"><div class="wrap">
   <p class="eyebrow"><span class="dot"></span> Mercado Libre México · {len(items)} productos vigilados · Actualizado {today}</p>
-  <h1>Compra más barato.<br><em>Solo ofertas reales.</em></h1>
-  <p class="lead">Rastreamos los precios más vendidos y mostramos únicamente lo que de verdad bajó, comparado con su historial.</p>
+  <h1>Los precios cambian todo el tiempo.<br><em>Nosotros los vigilamos por ti.</em></h1>
+  <p class="lead">Encuentra las <strong>ofertas relámpago</strong> y las bajas de precio que sí son reales, comparadas con el historial de cada producto. Cero descuentos inventados.</p>
+  <ul class="perks"><li>⚡ Relámpago al momento</li><li>📉 Solo bajas verificadas</li><li>🔄 5 actualizaciones al día</li></ul>
   <div class="cta">
     <a class="btn big" href="ofertas/">Ver todas las ofertas</a>
     <a class="ghost" href="#como-funciona">Cómo funciona</a>
     <a class="btn" href="#" onclick="document.getElementById('wa-modal').style.display='flex'; return false;">📱 Únete a WhatsApp</a>
   </div>
 </div></section>
+{explore_sec}
+{flash_rail}
 {rail("Las mayores bajas", deals[:16], '<a class="all" href="ofertas/">Ver todas →</a>')}
 <section id="como-funciona" class="wrap how">
   <h2>Cómo funciona</h2>
@@ -290,7 +304,7 @@ def home(items, deals, lists):
   </ol>
 </section>
 {rails}
-<section class="wrap"><h2>Explora por categoría</h2><div class="chips wrapc"><a class="chip on" href="c/">Todas las categorías</a>{explore}</div></section>
+{explore_sec}
 <section id="faq" class="wrap"><h2>Preguntas frecuentes</h2>{faq}</section>
 
 <div id="wa-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); align-items: center; justify-content: center; z-index: 9999; backdrop-filter: blur(5px); opacity: 0; animation: fadeIn 0.3s forwards;">
@@ -388,6 +402,16 @@ def build(items):
     lists = build_listings(items)
     pages = {"": home(items, deals, lists), "buscar/": search_page(), **legal_pages()}
     lo = lambda s: money(min(i["now"] for i in s))
+    
+    flash_deals = [d for d in deals if d.get("is_flash")]
+    pages.update(paged(
+        "relampago/", "Relámpago", [(config.SITE_NAME, ""), ("Relámpago", "relampago/")],
+        "Ofertas Relámpago en Mercado Libre",
+        f"{len(flash_deals)} ofertas relámpago activas hoy. Precios verificados. Actualizado {today}.",
+        "⚡ Ofertas Relámpago",
+        f"Ofertas por tiempo limitado detectadas en la última actualización ({today}). Pueden haber terminado: verifica en la tienda." if flash_deals else "Por el momento no hay ofertas relámpago activas. Revisa más tarde.",
+        flash_deals, robots="index, follow" if flash_deals else "noindex, follow"))
+
     pages.update(paged(
         "ofertas/", "Ofertas", [(config.SITE_NAME, ""), ("Ofertas", "ofertas/")],
         "Todas las ofertas en Mercado Libre México",
@@ -430,15 +454,36 @@ def main():
         (out / path).mkdir(parents=True, exist_ok=True)
         (out / path / "index.html").write_text(html, encoding="utf-8")
     (out / "search.json").write_text(json.dumps(search_index(items), ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    now = datetime.now(timezone.utc)
+    nxt = min((now.replace(hour=h, minute=0, second=0, microsecond=0) + timedelta(days=d) for d in (0, 1) for h in config.RUN_HOURS_UTC),
+              key=lambda t: (t <= now, t))
+    # "next" = arranque de la próxima corrida; la página tarda unos minutos más en publicarse
+    (out / "status.json").write_text(json.dumps({"updated": now.isoformat(), "next": nxt.isoformat()}), encoding="utf-8")
     (out / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {config.SITE_URL}/sitemap.xml\n")
     (out / "sitemap.xml").write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
         + "".join(f"<url><loc>{config.SITE_URL}/{p}</loc><lastmod>{date.today().isoformat()}</lastmod>"
-                  "<changefreq>daily</changefreq></url>" for p in pages if p != "buscar/") + "</urlset>\n")
+                  "<changefreq>daily</changefreq></url>" for p in pages if "noindex" not in pages[p]) + "</urlset>\n")
     (out / "icon.svg").write_text(
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#00e57a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V3h7.5a5 5 0 0 1 0 10H6"/><path d="M10 13l8 8"/><path d="M18 15v6h-6"/></svg>',
         encoding="utf-8"
     )
+    
+    manifest = {
+        "name": config.SITE_NAME,
+        "short_name": config.SITE_NAME,
+        "start_url": "./",
+        "display": "standalone",
+        "background_color": "#07080d",
+        "theme_color": "#07080d",
+        "description": "Ofertas reales en Mercado Libre",
+        "icons": [
+            {"src": "icon.svg", "sizes": "512x512", "type": "image/svg+xml"}
+        ]
+    }
+    (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    
+    
     print(f"Sitio generado en {out}: {len(pages)} páginas")
 
 

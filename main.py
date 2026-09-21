@@ -35,6 +35,47 @@ def run():
     cats.sort(key=lambda c: c[2])  # estable: subcategorías primero, las generales al final
     cats = [c[:2] for c in cats]
     deadline = time.time() + config.MAX_RUN_MINUTES * 60
+    by_id = dict(cats)
+
+    def category_name(cid):
+        """Categoría de un producto nuevo: la más específica que rastreamos; None si es una categoría excluida."""
+        path = ml.category_path(cid)
+        if not path or path[0][0] in config.EXCLUDED_CATEGORIES:
+            return None
+        return next((by_id[i] for i, _ in reversed(path) if i in by_id), path[0][1])
+
+    def check(pid, cat_name=None):
+        nonlocal checked, drops
+        found = ml.best_price(pid)
+        if found is None:
+            return
+        price, orig, rep, is_flash, cid = found
+        if not db.known_product(conn, pid):
+            cat_name = cat_name or category_name(cid)
+            info = cat_name and ml.product(pid)
+            if not info:
+                return
+            db.save_product(conn, info, cat_name)
+        checked += 1
+
+        old = db.last_price(conn, pid)
+        db.save_price(conn, pid, price, orig, rep, is_flash)
+        conn.commit()
+
+        if old and price < old:
+            pct = (old - price) / old * 100
+            if pct >= config.MIN_DROP_PCT:
+                drops += 1
+                name, link = db.product_info(conn, pid)
+                notify(f"BAJO {pct:.1f}%: {name}\n  ${old:,.0f} -> ${price:,.0f}\n  {link}")
+
+    # primero los productos en promoción/relámpago que ML muestra hoy, aunque no estén entre los más vendidos
+    print("\n== Ofertas y relámpago ==")
+    for pid in ml.deal_products():
+        if time.time() > deadline:
+            break
+        seen.add(pid)
+        check(pid)
 
     for cat_id, cat_name in cats:
         if time.time() > deadline:
@@ -45,28 +86,7 @@ def run():
             if pid in seen:
                 continue
             seen.add(pid)
-            if not db.known_product(conn, pid):
-                info = ml.product(pid)
-                if not info:
-                    continue
-                db.save_product(conn, info, cat_name)
-
-            found = ml.best_price(pid)
-            if found is None:
-                continue
-            price, orig, rep = found
-            checked += 1
-
-            old = db.last_price(conn, pid)
-            db.save_price(conn, pid, price, orig, rep)
-            conn.commit()
-
-            if old and price < old:
-                pct = (old - price) / old * 100
-                if pct >= config.MIN_DROP_PCT:
-                    drops += 1
-                    name, link = db.product_info(conn, pid)
-                    notify(f"BAJO {pct:.1f}%: {name}\n  ${old:,.0f} -> ${price:,.0f}\n  {link}")
+            check(pid, cat_name)
 
     print(f"\nRevisados: {checked} | Bajadas detectadas: {drops}")
 

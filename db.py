@@ -22,9 +22,9 @@ def connect():
 
 
 def migrate(conn):
-    """orig = precio tachado (promoción) que reporta la tienda; rep = reputación del vendedor."""
+    """orig = precio tachado (promoción) que reporta la tienda; rep = reputación del vendedor; is_flash = oferta relámpago."""
     cols = [r[1] for r in conn.execute("PRAGMA table_info(prices)")]
-    for col, typ in (("orig", "REAL"), ("rep", "TEXT")):
+    for col, typ in (("orig", "REAL"), ("rep", "TEXT"), ("is_flash", "INTEGER")):
         if col not in cols:
             conn.execute(f"ALTER TABLE prices ADD COLUMN {col} {typ}")
 
@@ -48,8 +48,8 @@ def last_price(conn, product_id):
     return row[0] if row else None
 
 
-def save_price(conn, product_id, price, orig=None, rep=None):
-    conn.execute("INSERT INTO prices (product_id, price, orig, rep) VALUES (?,?,?,?)", (product_id, price, orig, rep))
+def save_price(conn, product_id, price, orig=None, rep=None, is_flash=0):
+    conn.execute("INSERT INTO prices (product_id, price, orig, rep, is_flash) VALUES (?,?,?,?,?)", (product_id, price, orig, rep, int(is_flash)))
 
 
 def product_info(conn, product_id):

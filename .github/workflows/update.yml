@@ -1,6 +1,6 @@
 name: Actualizar precios
 on:
-  schedule: [{cron: "0 11 * * *"}]
+  schedule: [{cron: "0 0,4,12,16,20 * * *"}]  # mantener igual que RUN_HOURS_UTC en config.py
   workflow_dispatch:
 permissions:
   contents: write
@@ -8,8 +8,9 @@ concurrency: update
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 120
     env:
+      MAX_RUN_MINUTES: 60
       ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
       ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
     steps:
@@ -25,6 +26,6 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           git add prices.db docs
           git diff --cached --quiet && exit 0
-          git commit -m "Actualización diaria"
+          git commit -m "Actualización de precios"
           git pull --rebase -X theirs
           git push
