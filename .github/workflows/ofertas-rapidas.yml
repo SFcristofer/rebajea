@@ -1,0 +1,30 @@
+name: Ofertas rápidas
+on:
+  schedule: [{cron: "*/15 * * * *"}]  # cada 15 min; solo revisa la página de ofertas/relámpago de ML
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: update  # mismo grupo que el escaneo completo: evita choques al guardar prices.db
+jobs:
+  ofertas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
+      ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install requests
+      - run: python main.py --deals-only
+      - run: |
+          git config user.name "bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add prices.db
+          git diff --cached --quiet && exit 0
+          git commit -m "Chequeo rápido de ofertas"
+          git pull --rebase -X theirs
+          git push
