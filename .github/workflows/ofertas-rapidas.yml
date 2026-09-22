@@ -1,6 +1,6 @@
 name: Ofertas rápidas
 on:
-  schedule: [{cron: "*/15 * * * *"}]  # cada 15 min; solo revisa la página de ofertas/relámpago de ML
+  schedule: [{cron: "*/30 * * * *"}]  # cada 30 min; solo revisa la página de ofertas/relámpago de ML
   workflow_dispatch:
 permissions:
   contents: write
