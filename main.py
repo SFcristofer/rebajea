@@ -1,5 +1,6 @@
 """Revisa precios y avisa de cualquier bajada. Ejecutar: python main.py"""
 import html
+import json
 import os
 import random
 import sys
@@ -35,12 +36,13 @@ def telegram(conn, hits, supers):
     for icon, (pct, name, old, price, link, pid) in posts:
         url = link + ("&" if "?" in link else "?") + urlencode(config.AFFILIATE)
         text = (f"{icon} <b>-{pct:.0f}%</b> {html.escape(name)}\n💰 ${price:,.0f} <s>${old:,.0f}</s>\n"
-                f"👉 {url}\n📉 Más bajadas reales: {config.SITE_URL}/")
+                f"📉 Más bajadas reales: {config.SITE_URL}/")
+        markup = json.dumps({"inline_keyboard": [[{"text": "🛒 Dale click aquí", "url": url}]]})
         img = conn.execute("SELECT image FROM products WHERE id=?", (pid,)).fetchone()[0]
         api = f"https://api.telegram.org/bot{token}/"
         try:
-            r = requests.post(api + "sendPhoto", data={"chat_id": chat, "photo": img, "caption": text, "parse_mode": "HTML"}, timeout=20) if img \
-                else requests.post(api + "sendMessage", data={"chat_id": chat, "text": text, "parse_mode": "HTML"}, timeout=20)
+            r = requests.post(api + "sendPhoto", data={"chat_id": chat, "photo": img, "caption": text, "parse_mode": "HTML", "reply_markup": markup}, timeout=20) if img \
+                else requests.post(api + "sendMessage", data={"chat_id": chat, "text": text, "parse_mode": "HTML", "reply_markup": markup}, timeout=20)
             print("Telegram:", r.status_code)
         except requests.RequestException as e:
             print("Telegram falló:", e)
