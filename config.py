@@ -21,7 +21,9 @@ RUN_HOURS_UTC = (0, 4, 12, 16, 20)  # horas de las corridas (cron de update.yml)
 SEARCHES = ["smart tv 32 pulgadas", "smart tv 40 pulgadas", "smart tv 43 pulgadas", "smart tv 50 pulgadas", "smart tv 55 pulgadas",
             "laptop hp 15.6", "laptop lenovo", "laptop asus", "audifonos bluetooth inalambricos", "audifonos tws", "lavadora automatica 19 kg", "refrigerador 2 puertas", "consola playstation 5", "consola xbox series", "nintendo switch"]  # búsquedas por texto extra
 PRODUCTS_PER_CATEGORY = 20   # cuántos productos vigilar por categoría
-MIN_DROP_PCT = 1.0           # cualquier bajada >= a este % genera alerta
+TELEGRAM_MIN_PCT = 15        # solo se publican en Telegram bajadas >= a este %
+TELEGRAM_MAX_POSTS = 5       # máximo de publicaciones por corrida
+MIN_DROP_PCT = 1.0          # cualquier bajada >= a este % genera alerta
 REQUEST_DELAY = 0.3          # segundos entre llamadas a la API
 
 

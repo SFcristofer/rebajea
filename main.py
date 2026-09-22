@@ -1,7 +1,12 @@
 """Revisa precios y avisa de cualquier bajada. Ejecutar: python main.py"""
+import html
+import os
 import random
 import sys
 import time
+from urllib.parse import urlencode
+
+import requests
 
 import config
 import db
@@ -13,11 +18,32 @@ def notify(message):
     print(message)
 
 
+def telegram(conn, hits):
+    """Publica en el canal las mayores bajadas de la corrida (si hay TELEGRAM_TOKEN y TELEGRAM_CHAT)."""
+    token, chat = os.environ.get("TELEGRAM_TOKEN"), os.environ.get("TELEGRAM_CHAT")
+    if not (token and chat):
+        return
+    top = sorted((h for h in hits if h[0] >= config.TELEGRAM_MIN_PCT), reverse=True)[:config.TELEGRAM_MAX_POSTS]
+    for pct, name, old, price, link, pid in top:
+        url = link + ("&" if "?" in link else "?") + urlencode(config.AFFILIATE)
+        text = (f"🔥 <b>-{pct:.0f}%</b> {html.escape(name)}\n💰 ${price:,.0f} <s>${old:,.0f}</s>\n"
+                f"👉 {url}\n📉 Más bajadas reales: {config.SITE_URL}/")
+        img = conn.execute("SELECT image FROM products WHERE id=?", (pid,)).fetchone()[0]
+        api = f"https://api.telegram.org/bot{token}/"
+        try:
+            r = requests.post(api + "sendPhoto", data={"chat_id": chat, "photo": img, "caption": text, "parse_mode": "HTML"}, timeout=20) if img \
+                else requests.post(api + "sendMessage", data={"chat_id": chat, "text": text, "parse_mode": "HTML"}, timeout=20)
+            print("Telegram:", r.status_code)
+        except requests.RequestException as e:
+            print("Telegram falló:", e)
+        time.sleep(3)
+
+
 def run():
     ml = MercadoLibre()
     conn = db.connect()
     checked = drops = 0
-    seen = set()
+    seen, hits = set(), []
 
     # todas las categorías de ML México y sus subcategorías; las más específicas primero
     # para que cada producto quede en su categoría concreta y no en la general
@@ -68,6 +94,7 @@ def run():
                 drops += 1
                 name, link = db.product_info(conn, pid)
                 notify(f"BAJO {pct:.1f}%: {name}\n  ${old:,.0f} -> ${price:,.0f}\n  {link}")
+                hits.append((pct, name, old, price, link, pid))
 
     # primero los productos en promoción/relámpago que ML muestra hoy, aunque no estén entre los más vendidos
     print("\n== Ofertas y relámpago ==")
@@ -89,6 +116,7 @@ def run():
             check(pid, cat_name)
 
     print(f"\nRevisados: {checked} | Bajadas detectadas: {drops}")
+    telegram(conn, hits)
 
 
 if __name__ == "__main__":
