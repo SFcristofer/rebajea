@@ -18,15 +18,23 @@ def notify(message):
     print(message)
 
 
-def telegram(conn, hits):
-    """Publica en el canal las mayores bajadas de la corrida (si hay TELEGRAM_TOKEN y TELEGRAM_CHAT)."""
+def is_super(price, orig, flash):
+    """Superoferta: relámpago, o descuento >= SUPER_PCT contra el precio tachado."""
+    return bool(flash) or bool(orig and orig > price and (orig - price) / orig * 100 >= config.SUPER_PCT)
+
+
+def telegram(conn, hits, supers):
+    """Publica en el canal las superofertas nuevas y las mayores bajadas (si hay TELEGRAM_TOKEN y TELEGRAM_CHAT)."""
     token, chat = os.environ.get("TELEGRAM_TOKEN"), os.environ.get("TELEGRAM_CHAT")
     if not (token and chat):
         return
-    top = sorted((h for h in hits if h[0] >= config.TELEGRAM_MIN_PCT), reverse=True)[:config.TELEGRAM_MAX_POSTS]
-    for pct, name, old, price, link, pid in top:
+    sup_ids = {s[5] for s in supers}
+    drops = (h for h in hits if h[0] >= config.TELEGRAM_MIN_PCT and h[5] not in sup_ids)
+    posts = [("⚡ <b>SUPEROFERTA</b>", s) for s in sorted(supers, reverse=True)[:config.TELEGRAM_MAX_SUPER]] \
+        + [("🔥", h) for h in sorted(drops, reverse=True)[:config.TELEGRAM_MAX_POSTS]]
+    for icon, (pct, name, old, price, link, pid) in posts:
         url = link + ("&" if "?" in link else "?") + urlencode(config.AFFILIATE)
-        text = (f"🔥 <b>-{pct:.0f}%</b> {html.escape(name)}\n💰 ${price:,.0f} <s>${old:,.0f}</s>\n"
+        text = (f"{icon} <b>-{pct:.0f}%</b> {html.escape(name)}\n💰 ${price:,.0f} <s>${old:,.0f}</s>\n"
                 f"👉 {url}\n📉 Más bajadas reales: {config.SITE_URL}/")
         img = conn.execute("SELECT image FROM products WHERE id=?", (pid,)).fetchone()[0]
         api = f"https://api.telegram.org/bot{token}/"
@@ -43,7 +51,7 @@ def run():
     ml = MercadoLibre()
     conn = db.connect()
     checked = drops = 0
-    seen, hits = set(), []
+    seen, hits, supers = set(), [], []
 
     # todas las categorías de ML México y sus subcategorías; las más específicas primero
     # para que cada producto quede en su categoría concreta y no en la general
@@ -85,8 +93,15 @@ def run():
         checked += 1
 
         old = db.last_price(conn, pid)
+        prev = conn.execute("SELECT price, orig, is_flash FROM prices WHERE product_id=? ORDER BY seen_at DESC, rowid DESC LIMIT 1", (pid,)).fetchone()
         db.save_price(conn, pid, price, orig, rep, is_flash)
         conn.commit()
+
+        if is_super(price, orig, is_flash) and not (prev and is_super(*prev)):  # entra ahora en superoferta
+            base = orig if orig and orig > price else old or price
+            if base > price:  # sin descuento demostrable no hay nada que anunciar
+                name, link = db.product_info(conn, pid)
+                supers.append(((base - price) / base * 100, name, base, price, link, pid))
 
         if old and price < old:
             pct = (old - price) / old * 100
@@ -116,7 +131,7 @@ def run():
             check(pid, cat_name)
 
     print(f"\nRevisados: {checked} | Bajadas detectadas: {drops}")
-    telegram(conn, hits)
+    telegram(conn, hits, supers)
 
 
 if __name__ == "__main__":
