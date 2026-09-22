@@ -46,4 +46,4 @@ CLIENT_ID = os.environ.get("ML_CLIENT_ID", "")
 CLIENT_SECRET = os.environ.get("ML_CLIENT_SECRET", "")
 
 # Afiliados de Mercado Libre (de tu enlace meli.la)
-AFFILIATE = {"matt_tool": "82823235", "matt_word": "cristocontreras2"}
+AFFILIATE = {"matt_tool": "82823235", "matt_word": "rebajea"}
