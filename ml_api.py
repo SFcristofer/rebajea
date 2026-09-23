@@ -39,13 +39,18 @@ class MercadoLibre:
         for wait in (0, 30, 90, 180):
             self._auth()
             time.sleep(config.REQUEST_DELAY + wait)
-            r = self.session.get(
-                f"{API}/{path}",
-                params=params,
-                headers={"Authorization": f"Bearer {self._token}"},
-                timeout=20,
-            )
-            if r.status_code != 429:  # 429 = límite de peticiones: esperar y reintentar
+            try:
+                r = self.session.get(
+                    f"{API}/{path}",
+                    params=params,
+                    headers={"Authorization": f"Bearer {self._token}"},
+                    timeout=20,
+                )
+            except requests.RequestException:  # caída de red/timeout: reintentar
+                if wait == 180:
+                    raise
+                continue
+            if r.status_code != 429 and r.status_code < 500:  # 429 = límite, 5xx = fallo de ML: esperar y reintentar
                 break
         if r.status_code == 404:
             return None
