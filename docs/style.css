@@ -176,3 +176,13 @@ body::after{background:radial-gradient(38% 32% at 70% 25%,rgba(52,211,153,.18),t
 .perks{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;list-style:none;padding:0;margin:18px 0 0}
 .perks li{padding:7px 14px;border-radius:999px;font-size:.85rem;font-weight:600;color:var(--ink);background:var(--s2);border:1px solid rgba(124,92,255,.4);box-shadow:0 0 16px -6px rgba(124,92,255,.7)}
 @media(max-width:700px){.hero .lead{font-size:1rem}.perks li{font-size:.78rem;padding:6px 11px}}
+/* anuncios propios de la portada */
+.ads{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:28px}
+.ad{display:flex;align-items:center;gap:18px;padding:16px 20px;border-radius:var(--r);text-decoration:none;border:1px solid var(--line);
+ background:linear-gradient(120deg,rgba(124,92,255,.22),rgba(34,211,238,.1));transition:transform .15s,box-shadow .15s}
+.ad:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(124,92,255,.35)}
+.ad img{width:96px;height:96px;object-fit:contain;background:#fff;border-radius:12px;flex:none}
+.ad b{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.35}
+.ad p{margin-top:4px;color:var(--mut)}.ad p strong{color:var(--mint);font-size:1.2rem}
+.adk{display:block;font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:var(--cyan);margin-bottom:4px}
+.ad.uni{background:linear-gradient(120deg,rgba(52,211,153,.2),rgba(124,92,255,.14))}

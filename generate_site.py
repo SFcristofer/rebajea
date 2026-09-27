@@ -285,6 +285,15 @@ def home(items, deals, lists):
     
     rails = "".join(rail(f"Lo mejor en {escape(c)}", [d for d in deals if d["cat"] == c][:15],
                          f'<a class="all" href="{cpath[c]}">Ver todo →</a>' if c in cpath else "") for c in cats)
+    # anuncios propios (como los de ML): la oferta del día con enlace de afiliado y, si está configurado, unishopp
+    top = deals[0] if deals else None
+    ads = (f'<a class="ad" href="{escape(aff(top["link"]))}" target="_blank" rel="sponsored noopener">'
+           f'<img src="{escape(top["image"] or "")}" alt="" loading="lazy"><div><span class="adk">🏆 Oferta del día · -{top["pct"]:.0f}%</span>'
+           f'<b>{escape(top["name"])}</b><p><strong>{money(top["now"])}</strong> <s>{money(top["top"])}</s></p></div></a>' if top else "")
+    if config.UNISHOPP_URL:
+        ads += (f'<a class="ad uni" href="{escape(config.UNISHOPP_URL)}" target="_blank" rel="noopener"><div><span class="adk">Patrocinado</span>'
+                f'<b>{escape(config.UNISHOPP_TEXT)}</b><p>Visita unishopp →</p></div></a>')
+    ads_sec = f'<section class="wrap ads">{ads}</section>' if ads else ""
     explore = "".join(f'<a class="chip" href="{p}">{escape(n)}</a>' for p, n, k, _ in lists if k == "t")
     explore_sec = f'<section class="wrap"><h2>Explora por categoría</h2><div class="chips wrapc"><a class="chip on" href="c/">Todas las categorías</a>{explore}</div></section>'
     faq = "".join(f"<details><summary>{escape(q)}</summary><p>{escape(a)}</p></details>" for q, a in FAQ)
@@ -300,6 +309,7 @@ def home(items, deals, lists):
   </div>
 </div></section>
 {explore_sec}
+{ads_sec}
 {flash_rail}
 {rail("Las mayores bajas", deals[:16], '<a class="all" href="ofertas/">Ver todas →</a>')}
 <section id="como-funciona" class="wrap how">

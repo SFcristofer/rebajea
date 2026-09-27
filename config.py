@@ -10,6 +10,8 @@ SITE_URL = "https://rebajea.online"
 GOATCOUNTER = "rebajea"  # código de tu cuenta en goatcounter.com (https://CODIGO.goatcounter.com); vacío = sin estadísticas
 CONTACT_EMAIL = ""  # correo público de contacto para las páginas legales (derechos ARCO); vacío = no se muestra
 OUT_DIR = BASE_DIR / "docs"
+UNISHOPP_URL = "https://unishopp-oficial.netlify.app"  # banner propio hacia tu marketplace en la portada; vacío = no se muestra
+UNISHOPP_TEXT = "Compra y vende en unishopp, el marketplace mexicano"
 
 SITE = "MLM"  # Mercado Libre México
 
