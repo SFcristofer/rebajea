@@ -49,6 +49,42 @@ def telegram(conn, hits, supers):
         time.sleep(3)
 
 
+def whatsapp_notify(conn, hits, supers):
+    """Envía al microservicio local de WhatsApp las ofertas."""
+    chat_id = os.environ.get("WA_GROUP_ID")
+    if not chat_id:
+        return
+    if not chat_id.endswith("@g.us") and not chat_id.endswith("@c.us"):
+        chat_id += "@g.us"
+    sup_ids = {s[5] for s in supers}
+    drops = (h for h in hits if h[0] >= config.TELEGRAM_MIN_PCT and h[5] not in sup_ids)
+    posts = [("⚡ *SUPEROFERTA*", s) for s in sorted(supers, reverse=True)[:config.TELEGRAM_MAX_SUPER]] \
+        + [("🔥", h) for h in sorted(drops, reverse=True)[:config.TELEGRAM_MAX_POSTS]]
+    
+    for icon, (pct, name, old, price, link, pid) in posts:
+        url = link + ("&" if "?" in link else "?") + urlencode(config.AFFILIATE)
+        text = (f"{icon} *-{pct:.0f}%* {name}\n"
+                f"💰 ${price:,.0f} ~${old:,.0f}~\n"
+                f"🛒 {url}\n\n"
+                f"📉 Más ofertas: {config.SITE_URL}/")
+        
+        img = conn.execute("SELECT image FROM products WHERE id=?", (pid,)).fetchone()[0]
+        
+        payload = {
+            "chatId": chat_id,
+            "message": text
+        }
+        if img:
+            payload["imageUrl"] = img
+            
+        try:
+            r = requests.post("http://localhost:3000/send", json=payload, timeout=20)
+            print("WhatsApp:", r.status_code)
+        except requests.RequestException as e:
+            print("WhatsApp falló:", e)
+        time.sleep(3)
+
+
 def run(deals_only=False):
     ml = MercadoLibre()
     conn = db.connect()
@@ -136,6 +172,7 @@ def run(deals_only=False):
 
     print(f"\nRevisados: {checked} | Bajadas detectadas: {drops}")
     telegram(conn, hits, supers)
+    whatsapp_notify(conn, hits, supers)
 
 
 if __name__ == "__main__":
