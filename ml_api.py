@@ -52,7 +52,7 @@ class MercadoLibre:
                 continue
             if r.status_code != 429 and r.status_code < 500:  # 429 = límite, 5xx = fallo de ML: esperar y reintentar
                 break
-        if r.status_code == 404:
+        if r.status_code in (400, 404):  # producto sin ofertas o rechazado: saltarlo, no tumbar la corrida
             return None
         r.raise_for_status()
         return r.json()
