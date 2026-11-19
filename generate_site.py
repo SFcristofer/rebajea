@@ -727,11 +727,28 @@ def main():
     out.mkdir(exist_ok=True)
     items = load()
     pages = build(items)
-    for d in ("ofertas", "c", "t", "relampago", "p", "temporada", "favoritos"):  # borra páginas viejas (paginación o categorías que ya no existen)
-        shutil.rmtree(out / d, ignore_errors=True)
+    # borra solo las páginas que ya no existen (paginación o categorías viejas)
+    keep = {(out / p / "index.html").resolve() for p in pages}
+    for d in ("ofertas", "c", "t", "relampago", "p", "temporada", "favoritos"):
+        for f in (out / d).rglob("index.html") if (out / d).exists() else ():
+            if f.resolve() not in keep:
+                f.unlink()
+                for parent in f.parents:  # quita carpetas que quedaron vacías
+                    if parent == out or any(parent.iterdir()):
+                        break
+                    parent.rmdir()
+    # escribe solo lo que cambió: menos disco, commits más chicos y el sitemap conserva su fecha real
+    old_sm = (out / "sitemap.xml").read_text(encoding="utf-8") if (out / "sitemap.xml").exists() else ""
+    lastmod = dict(re.findall(rf"<loc>{re.escape(config.SITE_URL)}/([^<]*)</loc><lastmod>([^<]+)</lastmod>", old_sm))
+    today, changed = date.today().isoformat(), 0
     for path, html in pages.items():
-        (out / path).mkdir(parents=True, exist_ok=True)
-        (out / path / "index.html").write_text(html, encoding="utf-8")
+        f = out / path / "index.html"
+        if f.exists() and f.read_text(encoding="utf-8") == html:
+            continue
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(html, encoding="utf-8")
+        lastmod[path], changed = today, changed + 1
+    print(f"Páginas modificadas: {changed} de {len(pages)}")
     (out / "search.json").write_text(json.dumps(search_index(items), ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     now = datetime.now(timezone.utc)
     nxt = min((now.replace(hour=h, minute=0, second=0, microsecond=0) + timedelta(days=d) for d in (0, 1) for h in config.RUN_HOURS_UTC),
@@ -741,8 +758,8 @@ def main():
     (out / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {config.SITE_URL}/sitemap.xml\n")
     (out / "sitemap.xml").write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
-        + "".join(f"<url><loc>{config.SITE_URL}/{p}</loc><lastmod>{date.today().isoformat()}</lastmod>"
-                  "<changefreq>daily</changefreq></url>" for p in pages if "noindex" not in pages[p]) + "</urlset>\n")
+        + "".join(f"\n<url><loc>{config.SITE_URL}/{p}</loc><lastmod>{lastmod.get(p, today)}</lastmod>"
+                  "<changefreq>daily</changefreq></url>" for p in pages if "noindex" not in pages[p]) + "\n</urlset>\n")
     (out / "icon.svg").write_text(
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#00e57a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V3h7.5a5 5 0 0 1 0 10H6"/><path d="M10 13l8 8"/><path d="M18 15v6h-6"/></svg>',
         encoding="utf-8"
