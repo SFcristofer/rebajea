@@ -27,7 +27,7 @@ TELEGRAM_MIN_PCT = 5         # solo se publican en Telegram bajadas >= a este %
 TELEGRAM_MAX_POSTS = 5       # máximo de bajadas publicadas por corrida (las mayores)
 SUPER_PCT = 30               # superoferta = relámpago o descuento >= a este % contra el precio tachado
 TELEGRAM_MAX_SUPER = 5       # máximo de superofertas publicadas por corrida
-MIN_DROP_PCT = 1.0          # cualquier bajada >= a este % genera alerta
+MIN_DROP_PCT = 3.0          # bajadas menores son ruido (redondeos, centavos); no se publican
 REQUEST_DELAY = 0.3          # segundos entre llamadas a la API
 
 

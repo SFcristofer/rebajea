@@ -11,6 +11,7 @@ import requests
 
 import config
 import db
+from generate_site import MAX_PCT, reference
 from ml_api import MercadoLibre
 
 
@@ -19,9 +20,10 @@ def notify(message):
     print(message)
 
 
-def is_super(price, orig, flash):
-    """Superoferta: relámpago, o descuento >= SUPER_PCT contra el precio tachado."""
-    return bool(flash) or bool(orig and orig > price and (orig - price) / orig * 100 >= config.SUPER_PCT)
+def super_pct(price, orig, flash, hist):
+    """% de superoferta contra la misma referencia que la web (mediana de 90 días / tachado creíble); 0 si no lo es."""
+    _, pct, _, _ = reference(price, orig, hist or [(price, "")])
+    return pct if pct >= config.SUPER_PCT or (flash and pct > 0) else 0
 
 
 def telegram(conn, hits, supers):
@@ -134,18 +136,18 @@ def run(deals_only=False):
 
         old = db.last_price(conn, pid)
         prev = conn.execute("SELECT price, orig, is_flash FROM prices WHERE product_id=? ORDER BY seen_at DESC, rowid DESC LIMIT 1", (pid,)).fetchone()
+        hist = conn.execute("SELECT price, seen_at FROM prices WHERE product_id=? AND seen_at >= date('now','-90 day') ORDER BY seen_at, rowid", (pid,)).fetchall()
         db.save_price(conn, pid, price, orig, rep, is_flash)
         conn.commit()
 
-        if is_super(price, orig, is_flash) and not (prev and is_super(*prev)):  # entra ahora en superoferta
-            base = orig if orig and orig > price else old or price
-            if base > price:  # sin descuento demostrable no hay nada que anunciar
-                name, link = db.product_info(conn, pid)
-                supers.append(((base - price) / base * 100, name, base, price, link, pid))
+        pct = super_pct(price, orig, is_flash, hist + [(price, "")])
+        if pct and not (prev and super_pct(*prev, hist)):  # entra ahora en superoferta (descuento real, no el tachado inflado)
+            name, link = db.product_info(conn, pid)
+            supers.append((pct, name, price / (1 - pct / 100), price, link, pid))
 
         if old and price < old:
             pct = (old - price) / old * 100
-            if pct >= config.MIN_DROP_PCT:
+            if config.MIN_DROP_PCT <= pct <= MAX_PCT:  # > MAX_PCT suele ser error de precio: no se anuncia
                 drops += 1
                 name, link = db.product_info(conn, pid)
                 notify(f"BAJO {pct:.1f}%: {name}\n  ${old:,.0f} -> ${price:,.0f}\n  {link}")

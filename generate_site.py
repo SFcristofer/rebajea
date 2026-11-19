@@ -1,5 +1,6 @@
 """Genera el sitio estático en docs/ desde prices.db. Ejecutar: python generate_site.py"""
 import json
+import shutil
 import re
 import unicodedata
 import sqlite3
@@ -15,8 +16,11 @@ import db
 FAQ = [
     ("¿Cómo detectan las ofertas?",
      "Guardamos el precio de cada producto de forma periódica y lo comparamos con su historial. "
-     "Es oferta lo que cuesta menos que su precio más alto registrado o que tiene una promoción "
-     "activa en la tienda, sin importar el porcentaje."),
+     "El precio de referencia es la mediana de lo que costó en los últimos 90 días (así un error "
+     "puntual del vendedor no infla el descuento), o el precio tachado de la tienda si es creíble. "
+     "Solo mostramos descuento con al menos 3 registros o un precio tachado verificable, y nunca "
+     "descuentos mayores al 85% (esos los revisamos a mano). Además te decimos si el descuento es falso "
+     "o si el precio subió justo antes de la «oferta»."),
     ("¿Cuesta algo usar el sitio?",
      "No, es 100% gratuito para ti. Nuestro objetivo es ayudarte a ahorrar dinero en tus compras encontrando las verdaderas ofertas antes de que se agoten."),
     ("¿Los precios son definitivos?",
@@ -55,30 +59,119 @@ def load():
         """SELECT p.name, p.link, p.category, p.image, p.id,
                   (SELECT price FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1),
                   (SELECT rep FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1),
-                  MAX((SELECT MAX(price) FROM prices WHERE product_id=p.id),
-                      COALESCE((SELECT orig FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1), 0)),
+                  (SELECT orig FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1),
                   (SELECT is_flash FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1)
            FROM products p"""
     ).fetchall()
     items = []
     today = date.today().isoformat()
-    for name, link, cat, image, pid, now, rep, top, is_flash in rows:
+    for name, link, cat, image, pid, now, rep, orig, is_flash in rows:
         if now is None or not rep:  # sin vendedor confiable verificado no se publica
             continue
-        pct = (top - now) / top * 100 if top else 0
-        hist = conn.execute("SELECT price, date(seen_at) FROM prices WHERE product_id=? ORDER BY seen_at, rowid",
-                            (pid,)).fetchall()
+        hist = conn.execute("SELECT price, seen_at FROM prices WHERE product_id=? AND seen_at >= date('now', '-90 day') "
+                            "ORDER BY seen_at, rowid", (pid,)).fetchall() or [(now, today)]
+        top, pct, hist, flagged = reference(now, orig, hist)
         ps = [h[0] for h in hist]
+        if flagged:
+            review.append(f"{now:>10,.0f} | tachado {orig or 0:,.0f} | máx {max(ps):,.0f} | {name[:70]} | {link}")
+        k = len(hist) - 1  # inicio de la racha del precio actual = cuándo lo detectamos
+        while k and hist[k - 1][0] == now:
+            k -= 1
         tag = ""
-        if len(ps) > 1 and ps[-1] < ps[-2] and hist[-1][1] == today:
-            tag = f"Bajó ${ps[-2] - ps[-1]:,.0f} hoy"
-        elif len(ps) > 1 and now == min(ps) and pct > 0:
-            tag = "Mínimo histórico"
+        if len(ps) > 1 and ps[-1] < ps[-2] and hist[-1][1][:10] == today and (ps[-2] - now) / ps[-2] * 100 >= config.MIN_DROP_PCT:
+            tag = f"Bajó {money(ps[-2] - now)} hoy (antes {money(ps[-2])})"
         elif pct > 0:
             tag = "En promoción"
-        items.append(dict(name=name, link=link, cat=cat, image=image, rep=rep, now=now, top=top, pct=pct, ps=ps, tag=tag, is_flash=bool(is_flash)))
-    items.sort(key=lambda i: (-i["pct"], i["now"]))  # mejor promoción primero; a igualdad, el más barato
+        items.append(dict(id=pid, hd=[h[1][:10] for h in hist], name=clean_title(name), link=link, cat=cat, image=image, rep=rep, now=now, top=top, pct=pct,
+                          ps=ps, since=hist[0][1], tag=tag, is_flash=bool(is_flash), light=light(now, orig, hist),
+                          seen=hist[k][1].replace(" ", "T") + "Z", off=off_season(name)))
+    # fuera de temporada al final; luego mejor promoción primero; a igualdad, el más barato
+    items.sort(key=lambda i: (i["off"], -i["pct"], i["now"]))
+    if review:
+        print(f"Revisión manual: {len(review)} productos con descuento > {MAX_PCT}% (no se muestra descuento)")
+        print("\n".join(review[:30]))
     return items
+
+
+# temporadas: (regex en el nombre, desde MM-DD, hasta MM-DD); fuera de fecha el producto baja al final y sale de la portada
+SEASONS = [
+    (r"(?i)hallowe+n|d[ií]a de (los )?muertos|catrina|calabaza decorativa|disfraz", "09-15", "11-02"),
+    (r"(?i)navide|navidad|santa claus|[aá]rbol de navidad|christmas", "10-25", "12-31"),
+    (r"(?i)reyes magos|rosca de reyes", "12-15", "01-06"),
+    (r"(?i)san valent[ií]n", "01-15", "02-14"),
+    (r"(?i)d[ií]a de las madres", "04-10", "05-10"),
+    (r"(?i)fiestas patrias|independencia de m[eé]xico|grito de", "08-15", "09-16"),
+    (r"(?i)regreso a clases", "07-01", "08-31"),
+]
+
+
+def off_season(name):
+    md = date.today().strftime("%m-%d")
+    for rx, a, b in SEASONS:
+        if re.search(rx, name):
+            return not (a <= md <= b if a <= b else md >= a or md <= b)
+    return False
+
+
+def light(now, orig, hist):
+    """Semáforo "¿Compro ya?" (clase, texto) con al menos 3 precios en el historial."""
+    ps = [h[0] for h in hist]
+    if len(ps) < 3:
+        return None
+    med = sorted(ps)[len(ps) // 2]
+    if now <= min(ps):
+        return "g", f"🟢 Precio más bajo desde {fecha(hist[0][1])}"
+    if orig and orig >= now * 1.1 and now >= med * 0.97:
+        return "r", f"🔴 Descuento falso: suele costar {money(med)}"
+    recent = [p for p, d in hist[-8:-1] if p > med * 1.15]
+    if recent and now >= med * 0.95:
+        return "r", f"🔴 Subió a {money(max(recent))} antes de la «oferta»"
+    return "y", "🟡 Precio normal"
+
+
+MESES = "ene feb mar abr may jun jul ago sep oct nov dic".split()
+
+
+def fecha(iso):
+    y, m, d = map(int, iso[:10].split("-"))
+    return f"{d} {MESES[m - 1]}"
+
+
+MAX_PCT = 85  # descuento máximo creíble; lo que lo pase se manda a revisión manual
+review = []
+
+
+def reference(now, orig, hist):
+    """(referencia, % descuento, historial sin atípicos, ¿a revisión?). Referencia = mediana de 90 días o precio
+    tachado creíble; sin datos suficientes no hay descuento, y si pasa de MAX_PCT se oculta y se marca."""
+    ps = sorted(h[0] for h in hist)
+    med = ps[len(ps) // 2]
+    hist = [h for h in hist if h[0] <= med * 3] or hist  # fuera errores del vendedor (precios absurdos)
+    top = med if len(ps) >= 3 else 0
+    cap = max(h[0] for h in hist) if top else med * 3  # con historial, el tachado no puede superar lo que realmente costó
+    if orig and now < orig <= cap:  # tachado de la tienda, si no está inflado frente al historial
+        top = max(top, orig)
+    pct = (top - now) / top * 100 if top > now else 0
+    return (top, pct, hist, False) if pct <= MAX_PCT else (0, 0, hist, True)
+
+
+def clean_title(name):
+    """Quita bloques repetidos ("A B A B"), palabras duplicadas y recorta a ~90 caracteres."""
+    w = name.split()
+    low = [re.sub(r"\W", "", x.lower()) for x in w]
+    for n in range(len(w) // 2, 1, -1):
+        k = next((k for k in range(len(w) - 2 * n + 1) if low[k:k + n] == low[k + n:k + 2 * n]), None)
+        if k is not None:
+            w, low = w[:k + n] + w[k + 2 * n:], low[:k + n] + low[k + 2 * n:]
+            break
+    seen, out = set(), []
+    for x, l in zip(w, low):
+        if len(l) > 3 and l in seen:  # relleno de palabras clave
+            continue
+        seen.add(l)
+        out.append(x)
+    s = " ".join(out)
+    return s if len(s) <= 90 else s[:90].rsplit(" ", 1)[0].rstrip(",;-/") + "…"
 
 
 def aff(link):
@@ -94,11 +187,11 @@ def spark(ps):
         return ""
     lo, hi, n = min(ps), max(ps), len(ps) - 1
     pts = " ".join(f"{k / n * 56:.1f},{16 - (p - lo) / (hi - lo) * 14:.1f}" for k, p in enumerate(ps))
-    return (f'<svg class="sp" viewBox="0 0 56 18" width="56" height="18" aria-hidden="true">'
+    return (f'<svg class="sp" viewBox="0 0 56 18" width="56" height="18" role="img" aria-label="Historial de precio">'
             f'<polyline points="{pts}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>')
 
 
-def card(i):
+def card(i, up=""):
     deal = i["pct"] >= config.MIN_DROP_PCT
     flash = i.get("is_flash")
     hot = i["pct"] >= 60 and not flash
@@ -108,26 +201,33 @@ def card(i):
     old = f'<s>{money(i["top"])}</s>' if deal else ""
     save = f'<p class="save">Ahorras {money(i["top"] - i["now"])}</p>' if deal else ""
     bar = f'<div class="bar"><i style="width:{min(i["pct"], 100):.0f}%"></i></div>' if deal else ""
-    trend = (f'<p class="trend">{spark(i["ps"])}<span>{i["tag"]}</span></p>' if i["tag"] or spark(i["ps"]) else "")
+    sp = spark(i["ps"])
+    hist = (f'<small class="hist">{len(i["ps"])} precios desde {fecha(i["since"])} · mín {money(min(i["ps"]))} · máx {money(max(i["ps"]))}</small>'
+            if sp else "")
+    trend = (f'<p class="trend">{sp}<span>{i["tag"]}</span></p>{hist}' if i["tag"] or sp else "")
+    lt = i.get("light")
+    trend += f'<p class="light {lt[0]}">{lt[1]}</p>' if lt else ""
+    trend += f'<small class="ago" data-t="{i["seen"]}"></small>' if i.get("seen") else ""
     img = (f'<img src="{escape(i["image"])}" alt="{escape(i["name"])}" width="300" height="225" loading="lazy">'
            if i["image"] else "")
-    return f"""<a class="card{cls}" href="{escape(aff(i['link']))}" target="_blank" rel="sponsored noopener">
-  {badge}<div class="img">{img}</div>
+    page = f'<a class="hl" href="{up}{i["page"]}">📈 Ver historial de precio</a>' if i.get("page") else ""
+    return f"""<div class="card{cls}" data-id="{i['id']}" data-p="{i['now']:.0f}" data-d="{i['pct']:.0f}" data-f="{int(bool(flash))}">
+  {badge}<button class="fav" type="button" aria-label="Guardar en favoritos" data-id="{i['id']}">♡</button><div class="img">{img}</div>
   <div class="body"><span class="cat" title="{escape(i['cat'])}">{escape(i['cat'])}</span>
-  <h3>{escape(i['name'])}</h3>
+  <h3><a class="st" href="{escape(aff(i['link']))}" target="_blank" rel="sponsored noopener">{escape(i['name'])}</a></h3>
   <p class="price"><strong>{money(i['now'])}</strong><small>MXN</small> {old}</p>
   {bar}{save}{trend}
-  <p class="rep">✓ {escape(i['rep'])}</p>
+  <p class="rep">✓ {escape(i['rep'])}</p>{page}
   <span class="go">Ver oferta →</span></div>
-</a>"""
+</div>"""
 
 
 PER_PAGE = 24
-TABS = [("Inicio", ""), ("Relámpago", "relampago/"), ("Ofertas", "ofertas/"), ("Categorías", "c/"), ("Más buscados", "t/")]
+TABS = [("Inicio", ""), ("Relámpago", "relampago/"), ("Ofertas", "ofertas/"), ("Categorías", "c/"), ("Más buscados", "t/"), ("♡ Favoritos", "favoritos/")]
 DISCLAIMER = ("es un rastreador independiente de ofertas. Los precios y la disponibilidad pueden variar rápidamente; "
               "por favor verifica el importe final en la página de la tienda antes de realizar tu compra. "
               "Como afiliado de Mercado Libre, podemos recibir una comisión por compras calificadas, sin costo extra para ti.")
-LEGAL = [("Privacidad", "privacidad/"), ("Términos", "terminos/")]
+LEGAL = [("Temporadas", "temporada/"), ("Privacidad", "privacidad/"), ("Términos", "terminos/")]
 
 
 def rel(path):
@@ -183,7 +283,7 @@ def layout(path, title, desc, body, active="", ld=(), robots="index, follow", pr
 <footer><div class="wrap">
   <nav class="fl">{tabs}</nav>
   <p>{config.SITE_NAME} {DISCLAIMER}</p>
-  <p>{" · ".join(f'<a href="{up}{p}">{n}</a>' for n, p in LEGAL)}</p>
+  <p>{" · ".join(f'<a href="{up}{p}">{n}</a>' for n, p in LEGAL)}{f' · Contacto: <a href="mailto:{config.CONTACT_EMAIL}">{config.CONTACT_EMAIL}</a>' if config.CONTACT_EMAIL else ""}</p>
 </div></footer>
 <script src="{up}app.js" defer></script>
 {stats_tag()}</body>
@@ -224,7 +324,24 @@ def pager(base, n, total):
     return f'<nav class="pager" aria-label="Paginación">{p}{"".join(out)}{x}</nav>'
 
 
-def paged(base, active, trail, title, desc, h1, lead, items, after="", robots="index, follow"):
+FILTERS = """<div class="tools flt" data-k="{k}" data-m="{m}"><select class="chip" id="fp" aria-label="Precio máximo"><option value="">Cualquier precio</option>{prices}</select>
+  <select class="chip" id="fd" aria-label="Descuento mínimo"><option value="0">Cualquier descuento</option><option value="10">10% o más</option><option value="30">30% o más</option><option value="50">50% o más</option></select>
+  <label class="chip"><input type="checkbox" id="ff"> Solo relámpago</label>
+  <select class="chip" id="fo" aria-label="Ordenar"><option value="">Orden recomendado</option><option value="p">Menor precio</option><option value="d">Mayor descuento</option><option value="a">Mayor ahorro en pesos</option></select>
+  <span class="cnt" id="fc"></span></div>"""
+
+
+def filters(key, items, m=""):
+    """Filtros reales sobre TODA la lista (no solo la página): app.js usa search.json con esta clave."""
+    if not key or len(items) < 8:
+        return ""
+    hi = max(i["now"] for i in items)
+    prices = "".join(f'<option value="{v}">Hasta {money(v)}</option>' for v in (300, 500, 1000, 2000, 3000, 5000, 8000, 10000, 15000, 20000, 30000)
+                     if v < hi and (not m or v < int(m)))
+    return FILTERS.format(k=escape(key), m=m, prices=prices)
+
+
+def paged(base, active, trail, title, desc, h1, lead, items, after="", robots="index, follow", key="", m=""):
     """Genera una página estática por cada PER_PAGE productos: base, base+'2/', base+'3/'…  → {ruta: html}."""
     total = max(1, -(-len(items) // PER_PAGE))
     out = {}
@@ -235,9 +352,10 @@ def paged(base, active, trail, title, desc, h1, lead, items, after="", robots="i
         suffix = f" - Página {n}" if n > 1 else ""
         body = f"""<section class="wrap">{crumb_html}
   <h1 class="lh">{escape(h1)}</h1>
-  <p class="lead lh">{lead}</p>
-  <div class="grid">{"".join(card(i) for i in chunk)}</div>
-  {pager(base, n, total)}</section>{after}"""
+  <p class="lead lh">{lead.replace("%UP%", rel(path))}</p>
+  {filters(key, items, m)}<div class="grid" id="lst">{"".join(card(i, rel(path)) for i in chunk)}</div>
+  <p class="more"><button class="chip" id="fmore" hidden>Ver más</button></p>
+  <div id="pgr">{pager(base, n, total)}</div></section>{after}"""
         out[path] = layout(path, f"{title}{suffix} | {config.SITE_NAME}", desc + (f" Página {n} de {total}." if n > 1 else ""),
                            body, active, [crumb_ld, item_ld(chunk, (n - 1) * PER_PAGE + 1)],
                            robots=robots, prev=None if n == 1 else (base if n == 2 else f"{base}{n - 1}/"),
@@ -260,7 +378,20 @@ def hub(path, active, name, h1, lead, entries):
     return layout(path, f"{h1} | {config.SITE_NAME}", lead, body, active, [crumb_ld])
 
 
-def home(items, deals, lists):
+ICONS = [(r"celular|smartphone|tel[eé]fono", "📱"), (r"laptop|comput|pc|tablet", "💻"), (r"consola|videojuego|gaming", "🎮"),
+         (r"tv|pantalla|audio|video|bocina|aud[ií]fono", "📺"), (r"belleza|maquillaje|perfume|cuidado personal|cabello", "💄"),
+         (r"herramienta|taladro|construcci", "🔧"), (r"cocina|electrodom|lavadora|refrigerador|licuadora|freidora", "🍳"),
+         (r"hogar|mueble|decoraci|jard[ií]n|ba[ñn]o|cama", "🏠"), (r"beb[eé]|pa[ñn]al", "🍼"), (r"juguete|juego", "🧸"),
+         (r"deporte|fitness|bicicleta|gimnasio", "⚽"), (r"ropa|moda|calzado|tenis|zapato|reloj", "👟"),
+         (r"mascota|perro|gato", "🐾"), (r"auto|veh[ií]culo|moto|llanta", "🚗"), (r"salud|vitamina|suplemento", "💊"),
+         (r"c[aá]mara|foto", "📷"), (r"oficina|papeler|escolar|libro", "📚")]
+
+
+def icon(cat):
+    return next((e for rx, e in ICONS if re.search(rx, cat, re.I)), "🏷️")
+
+
+def home(items, deals, lists, seasons=()):
     cats = [c for c, _ in Counter(i["cat"] for i in deals).most_common(8)]
     cpath = {n: p for p, n, k, _ in lists if k == "c"}
     today = date.today().isoformat()
@@ -280,22 +411,33 @@ def home(items, deals, lists):
         '<div class="rail"><button class="nv l" aria-label="Anterior">‹</button><button class="nv r" aria-label="Siguiente">›</button>'
         f'<div class="grid feat">{"".join(card(i) for i in its)}</div></div></section>')
     
-    flash_deals = [d for d in deals if d.get("is_flash")]
-    flash_rail = rail("⚡ Ofertas Relámpago", flash_deals[:16], '<a class="all" href="relampago/">Ver todas →</a>') if flash_deals else ""
-    
-    rails = "".join(rail(f"Lo mejor en {escape(c)}", [d for d in deals if d["cat"] == c][:15],
-                         f'<a class="all" href="{cpath[c]}">Ver todo →</a>' if c in cpath else "") for c in cats)
-    # anuncios propios (como los de ML): la oferta del día con enlace de afiliado y, si está configurado, unishopp
-    top = deals[0] if deals else None
+    # portada sin repetidos ni productos de temporada pasada: cada bloque muestra algo nuevo
+    used = set()
+    def take(its, n):
+        out = [i for i in its if not i["off"] and i["link"] not in used][:n]
+        used.update(i["link"] for i in out)
+        return out
+    # oferta del día: la mayor baja con historial suficiente (no solo el tachado de la tienda)
+    top = (take([d for d in deals if len(d["ps"]) >= 3], 1) or take(deals, 1) or [None])[0]
     ads = (f'<a class="promo" href="{escape(aff(top["link"]))}" target="_blank" rel="sponsored noopener">'
            f'<img src="{escape(top["image"] or "")}" alt="" loading="lazy"><div><span class="pk">🏆 Oferta del día · -{top["pct"]:.0f}%</span>'
            f'<b>{escape(top["name"])}</b><p><strong>{money(top["now"])}</strong> <s>{money(top["top"])}</s></p></div></a>' if top else "")
-    if config.UNISHOPP_URL:
-        ads += (f'<a class="promo uni" href="{escape(config.UNISHOPP_URL)}" target="_blank" rel="noopener"><div><span class="pk">Recomendado</span>'
-                f'<b>{escape(config.UNISHOPP_TEXT)}</b><p>Visita unishopp →</p></div></a>')
+    flash = take([d for d in deals if d.get("is_flash")], 16)
+    flash_rail = rail("⚡ Ofertas Relámpago", flash, '<a class="all" href="relampago/">Ver todas →</a>') if flash else ""
+    best_rail = rail("Las mayores bajas", take(deals, 16), '<a class="all" href="ofertas/">Ver todas →</a>')
+    rails = "".join(rail(f"Lo mejor en {escape(c)}", sel,
+                         f'<a class="all" href="{cpath[c]}">Ver todo →</a>' if c in cpath else "")
+                    for c in cats if len(sel := take([d for d in deals if d["cat"] == c], 15)) >= 4)
+    uni = ""
+    if config.UNISHOPP_URL:  # publicidad propia: fuera del ranking de ofertas y marcada como tal
+        uni = (f'<section class="wrap promos ad"><a class="promo uni" href="{escape(config.UNISHOPP_URL)}" target="_blank" rel="noopener">'
+               f'<div><span class="pk">Publicidad · sitio propio</span><b>{escape(config.UNISHOPP_TEXT)}</b><p>Visita unishopp →</p></div></a></section>')
     ads_sec = f'<section class="wrap promos">{ads}</section>' if ads else ""
     explore = "".join(f'<a class="chip" href="{p}">{escape(n)}</a>' for p, n, k, _ in lists if k == "t")
-    explore_sec = f'<section class="wrap"><h2>Explora por categoría</h2><div class="chips wrapc"><a class="chip on" href="c/">Todas las categorías</a>{explore}</div></section>'
+    big = "".join(f'<a class="chip" href="{cpath[c]}">{icon(c)} {escape(c)}</a>' for c, _ in Counter(i["cat"] for i in deals).most_common(12) if c in cpath)
+    explore_sec = (f'<section class="wrap"><h2>Explora por categoría</h2><div class="chips wrapc"><a class="chip on" href="c/">Todas las categorías</a>{big}</div>'
+                   f'<div class="chips wrapc">{explore}</div>'
+                   f'<h2>Fechas especiales</h2><div class="chips wrapc">{"".join(f"<a class=chip href={p}>{escape(n)}</a>" for n, p, _, s in seasons if s)}</div></section>')
     faq = "".join(f"<details><summary>{escape(q)}</summary><p>{escape(a)}</p></details>" for q, a in FAQ)
     body = f"""<section class="hero"><div class="wrap">
   <p class="eyebrow"><span class="dot"></span> Mercado Libre México · {len(items)} productos vigilados · Actualizado {today}</p>
@@ -305,13 +447,12 @@ def home(items, deals, lists):
   <div class="cta">
     <a class="btn big" href="ofertas/">Ver todas las ofertas</a>
     <a class="ghost" href="#como-funciona">Cómo funciona</a>
-    <a class="btn" href="#" onclick="document.getElementById('wa-modal').style.display='flex'; return false;">📱 Únete a WhatsApp</a>
   </div>
 </div></section>
 {explore_sec}
 {ads_sec}
 {flash_rail}
-{rail("Las mayores bajas", deals[:16], '<a class="all" href="ofertas/">Ver todas →</a>')}
+{best_rail}
 <section id="como-funciona" class="wrap how">
   <h2>Cómo funciona</h2>
   <ol>
@@ -321,25 +462,9 @@ def home(items, deals, lists):
   </ol>
 </section>
 {rails}
-{explore_sec}
 <section id="faq" class="wrap"><h2>Preguntas frecuentes</h2>{faq}</section>
+{uni}
 
-<div id="wa-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); align-items: center; justify-content: center; z-index: 9999; backdrop-filter: blur(5px); opacity: 0; animation: fadeIn 0.3s forwards;">
-  <div style="background: #0f111a; padding: 2.5rem 2rem; border-radius: 16px; max-width: 420px; width: 90%; text-align: center; border: 1px solid #2a2d3e; box-shadow: 0 20px 40px rgba(0,0,0,0.6); transform: translateY(20px); animation: slideUp 0.3s forwards ease-out;">
-    <div style="font-size: 3rem; margin-bottom: 1rem;">📱</div>
-    <h3 style="margin: 0 0 1rem 0; color: #fff; font-size: 1.5rem;">¡Próximamente!</h3>
-    <p style="color: #a0a5b5; line-height: 1.6; margin: 0 0 2rem 0; font-size: 1.05rem;">
-      ¡Gracias por tu interés! Estamos trabajando arduamente para crear este servicio y enviarte las mejores ofertas directamente a tu WhatsApp.
-    </p>
-    <button onclick="document.getElementById('wa-modal').style.display='none'" style="background: #00e57a; color: #07080d; border: none; padding: 1rem 2rem; border-radius: 8px; font-weight: bold; font-size: 1rem; cursor: pointer; width: 100%; transition: opacity 0.2s;">
-      Entendido
-    </button>
-  </div>
-</div>
-<style>
-  @keyframes fadeIn {{ to {{ opacity: 1; }} }}
-  @keyframes slideUp {{ to {{ transform: translateY(0); }} }}
-</style>
 """
     return layout("", title, desc, body, "Inicio", ld)
 
@@ -412,12 +537,130 @@ def build_listings(items):
     return out
 
 
+# fechas especiales: (nombre, slug, cuándo es, regex de productos o None = las mayores ofertas del momento)
+SPECIAL = [
+    ("Buen Fin", "buen-fin", "el fin de semana largo de noviembre (alrededor del 20 de noviembre)", None),
+    ("Hot Sale", "hot-sale", "finales de mayo o inicios de junio", None),
+    ("Navidad", "navidad", "diciembre; conviene comprar desde noviembre para que llegue a tiempo",
+     r"(?i)juguete|consola|smartwatch|perfume|aud[ií]fono|[aá]rbol|navide"),
+    ("Día de Reyes", "reyes-magos", "el 6 de enero",
+     r"(?i)juguete|lego|mu[ñn]ec|consola|bicicleta|pat[ií]n|scooter|montable"),
+    ("Día de las Madres", "dia-de-las-madres", "el 10 de mayo",
+     r"(?i)perfume|maquillaje|bolsa|freidora|licuadora|cafetera|joyer|reloj|secadora de cabello|plancha de cabello"),
+    ("San Valentín", "san-valentin", "el 14 de febrero",
+     r"(?i)perfume|reloj|joyer|collar|aretes|peluche|bocina|aud[ií]fono"),
+    ("Regreso a clases", "regreso-a-clases", "agosto, antes del inicio del ciclo escolar",
+     r"(?i)mochila|laptop|tablet|calculadora|cuaderno|lonchera|escolar|impresora"),
+    ("Día del Padre", "dia-del-padre", "el tercer domingo de junio",
+     r"(?i)herramienta|taladro|reloj|parrilla|asador|rasuradora|afeitadora|smartwatch"),
+]
+RANGES = (1000, 2000, 3000, 5000, 8000, 10000, 15000, 20000)
+
+
+def season_items(items, rx):
+    sel = [i for i in items if not i["off"] and (rx is None or re.search(rx, i["name"]))]
+    if rx is None:
+        sel = [i for i in sel if i["pct"] >= config.MIN_DROP_PCT]
+    return sorted(sel, key=lambda i: (i["pct"] < config.MIN_DROP_PCT, -i["pct"], i["now"]))[:240]
+
+
+def chart(i):
+    """Gráfica grande del historial (SVG estático, sin JS)."""
+    ps, hd = i["ps"], i["hd"]
+    lo, hi, n = min(ps), max(ps), len(ps) - 1
+    W, H = 640, 220
+    y = lambda p: 20 + (hi - p) / (hi - lo) * (H - 50)
+    pts = " ".join(f"{40 + k / n * (W - 60):.1f},{y(p):.1f}" for k, p in enumerate(ps))
+    return (f'<svg class="chart" viewBox="0 0 {W} {H}" role="img" aria-label="Historial de precio de {escape(i["name"])}">'
+            f'<line x1="40" x2="{W - 20}" y1="{y(lo):.1f}" y2="{y(lo):.1f}" class="g"/><line x1="40" x2="{W - 20}" y1="{y(hi):.1f}" y2="{y(hi):.1f}" class="g"/>'
+            f'<text x="36" y="{y(hi) + 4:.1f}" text-anchor="end">{money(hi)}</text><text x="36" y="{y(lo) + 4:.1f}" text-anchor="end">{money(lo)}</text>'
+            f'<polyline points="{pts}" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>'
+            f'<text x="40" y="{H - 6}">{fecha(hd[0])}</text><text x="{W - 20}" y="{H - 6}" text-anchor="end">{fecha(hd[-1])}</text></svg>')
+
+
+def product_page(i, related, cat_path):
+    path = i["page"]
+    up = rel(path)
+    ps = i["ps"]
+    med = sorted(ps)[len(ps) // 2]
+    trail = [(config.SITE_NAME, "")] + ([(i["cat"], cat_path)] if cat_path else []) + [(i["name"], path)]
+    crumb_html, crumb_ld = crumbs(trail)
+    deal = i["pct"] >= config.MIN_DROP_PCT
+    lt = i.get("light")
+    near = (f"Está a {((i['now'] - min(ps)) / min(ps) * 100):.0f}% de su precio más bajo registrado ({money(min(ps))})."
+            if i["now"] > min(ps) else "Es el precio más bajo que hemos registrado.")
+    verdict = (f"Hoy cuesta {money(i['now'])} MXN. {near} En los últimos 90 días su precio típico (mediana) fue de {money(med)}, "
+               f"con un máximo de {money(max(ps))}.")
+    ld = {"@context": "https://schema.org", "@type": "Product", "name": i["name"], "image": i["image"], "category": i["cat"],
+          "sku": i["id"], "offers": {"@type": "Offer", "price": round(i["now"], 2), "priceCurrency": "MXN", "url": aff(i["link"]),
+                                     "availability": "https://schema.org/InStock", "seller": {"@type": "Organization", "name": "Mercado Libre"}}}
+    stats = "".join(f"<div><small>{k}</small><b>{v}</b></div>" for k, v in (
+        ("Precio más bajo", money(min(ps))), ("Precio más alto", money(max(ps))), ("Precio típico", money(med)),
+        ("Registros", len(ps)), ("Vigilado desde", fecha(i["since"]))))
+    rel_html = (f'<section class="wrap"><h2>Más ofertas en {escape(i["cat"])}</h2><div class="grid">{"".join(card(r, up) for r in related)}</div></section>'
+                if related else "")
+    img = f'<img src="{escape(i["image"])}" alt="{escape(i["name"])}" width="400" height="400">' if i["image"] else ""
+    body = f"""<section class="wrap">{crumb_html}
+  <div class="pp"><div class="ppi">{img}</div><div>
+  <h1 class="lh">{escape(i["name"])}</h1>
+  <p class="price big"><strong>{money(i["now"])}</strong><small>MXN</small>{f' <s>{money(i["top"])}</s> <span class="badge st">-{i["pct"]:.0f}%</span>' if deal else ""}</p>
+  {f'<p class="light {lt[0]}">{lt[1]}</p>' if lt else ""}
+  <p class="lead">{verdict}</p>
+  <p class="rep">✓ {escape(i["rep"])}</p>
+  <p class="cta"><a class="btn big" href="{escape(aff(i["link"]))}" target="_blank" rel="sponsored noopener">Ver en Mercado Libre →</a>
+  <button class="fav pf" type="button" aria-label="Guardar en favoritos" data-id="{i["id"]}">♡</button></p>
+  <small class="ago" data-t="{i["seen"]}"></small></div></div>
+  <h2>Historial de precio</h2>{chart(i)}<div class="stats">{stats}</div>
+  <p class="lead">El precio puede cambiar en cualquier momento; confírmalo en Mercado Libre antes de comprar.</p></section>{rel_html}"""
+    title = f"{i['name'][:60].rstrip(' ,-')} — precio e historial | {config.SITE_NAME}"
+    desc = f"{i['name'][:90]}: hoy {money(i['now'])} MXN. Precio más bajo {money(min(ps))}, típico {money(med)}. Historial de {len(ps)} precios en Mercado Libre México."
+    return layout(path, title, desc, body, "", [crumb_ld, ld])
+
+
 def build(items):
     """Todas las páginas del sitio: {ruta: html}."""
     today = date.today().isoformat()
     deals = [i for i in items if i["pct"] >= config.MIN_DROP_PCT]
+    for i in items:  # página propia solo con historial que aporte algo (≥5 precios y que haya cambiado)
+        if len(i["ps"]) >= 5 and max(i["ps"]) != min(i["ps"]):
+            i["page"] = f"p/{slug(i['name'])[:60].strip('-')}-{i['id'].lower()}/"
     lists = build_listings(items)
-    pages = {"": home(items, deals, lists), "buscar/": search_page(), **legal_pages()}
+    seasons = [(n, f"temporada/{s}/", when, season_items(items, rx)) for n, s, when, rx in SPECIAL]
+    pages = {"": home(items, deals, lists, seasons), "buscar/": search_page(), **legal_pages()}
+    for i in items:  # claves de filtro (temas y temporadas) para app.js
+        i["k"] = []
+    for p, n, k, sel in lists:
+        if k == "t":
+            for i in sel:
+                i["k"].append(p[:-1])
+    for n, p, when, sel in seasons:
+        for i in sel:
+            i["k"].append(p[:-1])
+    cpath = {n: p for p, n, k, _ in lists if k == "c"}
+    by_cat = {}
+    for i in items:
+        by_cat.setdefault(i["cat"], []).append(i)
+    for i in items:
+        if i.get("page"):
+            rel_items = [r for r in by_cat[i["cat"]] if r is not i and not r["off"]][:8]
+            pages[i["page"]] = product_page(i, rel_items, cpath.get(i["cat"]))
+    for n, p, when, sel in seasons:
+        what = "las mayores bajas de precio" if n in ("Buen Fin", "Hot Sale") else "los regalos y productos más buscados para esa fecha"
+        lead = (f"{n} en México es {when}. Aquí juntamos {what}, "
+                f"verificadas contra su historial y solo de vendedores confiables. {len(sel)} productos hoy; se actualiza a diario. Actualizado {today}.")
+        pages.update(paged(p, "", [(config.SITE_NAME, ""), ("Temporadas", "temporada/"), (n, p)],
+                           f"Ofertas de {n} en Mercado Libre México",
+                           f"Ofertas de {n} en Mercado Libre México con precios verificados contra su historial. {len(sel)} productos. Actualizado {today}.",
+                           f"Ofertas de {n}", lead, sel, robots="index, follow" if sel else "noindex, follow", key=p[:-1]))
+    pages["temporada/"] = hub("temporada/", "", "Temporadas", "Ofertas por temporada y fechas especiales",
+                              "Buen Fin, Hot Sale, Navidad, Reyes, Día de las Madres y más: ofertas reales para cada fecha especial en Mercado Libre México.",
+                              [(n, p, s) for n, p, when, s in seasons if s])
+    fcrumb, fld = crumbs([(config.SITE_NAME, ""), ("Favoritos", "favoritos/")])
+    pages["favoritos/"] = layout("favoritos/", f"Mis favoritos | {config.SITE_NAME}", "Los productos que guardaste en este navegador.",
+                                 f'<section class="wrap">{fcrumb}<h1 class="lh">♡ Mis favoritos</h1>'
+                                 '<p class="lead lh">Se guardan solo en este navegador. Toca ♡ en cualquier producto para agregarlo.</p>'
+                                 '<div class="grid" id="fav"></div><p class="none" id="fnone" hidden>Aún no tienes favoritos. '
+                                 '<a class="chip" href="../ofertas/">Ver ofertas</a></p></section>', "♡ Favoritos", [fld], robots="noindex, follow")
     lo = lambda s: money(min(i["now"] for i in s))
     
     flash_deals = [d for d in deals if d.get("is_flash")]
@@ -427,7 +670,7 @@ def build(items):
         f"{len(flash_deals)} ofertas relámpago activas hoy. Precios verificados. Actualizado {today}.",
         "⚡ Ofertas Relámpago",
         f"Ofertas por tiempo limitado detectadas en la última actualización ({today}). Pueden haber terminado: verifica en la tienda." if flash_deals else "Por el momento no hay ofertas relámpago activas. Revisa más tarde.",
-        flash_deals, robots="index, follow" if flash_deals else "noindex, follow"))
+        flash_deals, robots="index, follow" if flash_deals else "noindex, follow", key="relampago"))
 
     pages.update(paged(
         "ofertas/", "Ofertas", [(config.SITE_NAME, ""), ("Ofertas", "ofertas/")],
@@ -435,7 +678,7 @@ def build(items):
         f"{len(deals)} ofertas en Mercado Libre México con vendedores confiables, ordenadas de mayor a menor descuento. Actualizado {today}.",
         "Todas las ofertas en Mercado Libre",
         f"{len(deals)} productos con baja de precio, primero los de mayor descuento. Solo vendedores confiables. Actualizado {today}.",
-        deals))
+        deals, key="ofertas"))
     for kind, tab, name, h1, lead in (
             ("c", "Categorías", "Categorías", "Ofertas por categoría",
              "Elige una categoría para ver sus mejores ofertas en Mercado Libre México, con vendedores confiables y precios verificados."),
@@ -453,13 +696,28 @@ def build(items):
             desc = f"{len(sel)} ofertas en {name} en Mercado Libre México desde {lo(sel)} MXN, con vendedores confiables y precios verificados. Actualizado {today}."
             h1 = f"{name}: ofertas en Mercado Libre"
         lead = f"{len(sel)} opciones desde {lo(sel)} MXN. Solo vendedores confiables (nivel verde, MercadoLíder o tienda oficial); precios comparados con su historial. Actualizado {today}."
-        pages.update(paged(path, tab, [(config.SITE_NAME, ""), (hubname, f"{kind}/"), (name, path)], title, desc, h1, lead, sel))
+        key = path[:-1] if kind == "t" else "c:" + name
+        trail = [(config.SITE_NAME, ""), (hubname, f"{kind}/"), (name, path)]
+        if kind == "t":  # páginas fijas por rango de precio ("laptops de menos de $10,000")
+            rng = [(m, sub) for m in RANGES if 5 <= len(sub := [i for i in sel if i["now"] < m]) <= 0.8 * len(sel)][:3]
+            if rng:
+                lead += " Por precio: " + " ".join(f'<a class="chip" href="%UP%{path}menos-de-{m}/">Menos de {money(m)}</a>' for m, _ in rng)
+            for m, sub in rng:
+                rp = f"{path}menos-de-{m}/"
+                pages.update(paged(rp, tab, trail + [(f"Menos de {money(m)}", rp)],
+                                   f"{name} de menos de {money(m)} en Mercado Libre",
+                                   f"{len(sub)} {name.lower()} de menos de {money(m)} MXN en Mercado Libre México, de vendedores confiables. Desde {lo(sub)}. Actualizado {today}.",
+                                   f"{name} de menos de {money(m)}",
+                                   f"{len(sub)} opciones de menos de {money(m)} MXN, desde {lo(sub)}. Solo vendedores confiables; precios comparados con su historial. Actualizado {today}.",
+                                   sub, key=key, m=str(m)))
+        pages.update(paged(path, tab, trail, title, desc, h1, lead, sel, key=key))
     return pages
 
 
 def search_index(items):
     return [dict(n=i["name"], c=i["cat"], p=round(i["now"]), t=round(i["top"]), d=round(i["pct"], 1),
-                 l=aff(i["link"]), i=i["image"] or "", r=i["rep"], g=i["tag"]) for i in items]
+                 l=aff(i["link"]), i=i["image"] or "", r=i["rep"], g=i["tag"], id=i["id"], f=int(bool(i.get("is_flash"))),
+                 k=i.get("k", []), u=i.get("page", "")) for i in items]
 
 
 def main():
@@ -467,6 +725,8 @@ def main():
     out.mkdir(exist_ok=True)
     items = load()
     pages = build(items)
+    for d in ("ofertas", "c", "t", "relampago", "p", "temporada", "favoritos"):  # borra páginas viejas (paginación o categorías que ya no existen)
+        shutil.rmtree(out / d, ignore_errors=True)
     for path, html in pages.items():
         (out / path).mkdir(parents=True, exist_ok=True)
         (out / path / "index.html").write_text(html, encoding="utf-8")
