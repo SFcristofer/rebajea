@@ -173,6 +173,8 @@ def run(deals_only=False):
             check(pid, cat_name)
 
     print(f"\nRevisados: {checked} | Bajadas detectadas: {drops}")
+    if not deals_only:  # solo en el escaneo completo: compacta el historial para que prices.db no crezca sin límite
+        print("Lecturas repetidas compactadas:", db.compact(conn))
     telegram(conn, hits, supers)
     whatsapp_notify(conn, hits, supers)
 

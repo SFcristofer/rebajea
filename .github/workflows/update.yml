@@ -1,6 +1,6 @@
 name: Actualizar precios
 on:
-  schedule: [{cron: "0 0,4,12,16,20 * * *"}]  # mantener igual que RUN_HOURS_UTC en config.py
+  schedule: [{cron: "0 0,2,4,6,12,14,16,18,20,22 * * *"}]  # mantener igual que RUN_HOURS_UTC en config.py
   workflow_dispatch:
 permissions:
   contents: write
