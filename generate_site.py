@@ -240,6 +240,8 @@ def layout(path, title, desc, body, active="", ld=(), robots="index, follow", pr
     up, url = rel(path), f"{config.SITE_URL}/{path}"
     links = "".join(f'<link rel="{r}" href="{config.SITE_URL}/{p}">' for r, p in (("prev", prev), ("next", nxt)) if p is not None)
     tabs = "".join(f'<a href="{up}{p}"{" class=on" if n == active else ""}>{n}</a>' for n, p in TABS)
+    m = re.search(r'"image": "(https?://[^"]+)"', json.dumps(list(ld)))  # foto principal para Google y redes
+    og_img = f'\n<meta property="og:image" content="{escape(m.group(1))}">' if m else ""
     return f"""<!doctype html>
 <html lang="es-MX">
 <head>
@@ -247,7 +249,9 @@ def layout(path, title, desc, body, active="", ld=(), robots="index, follow", pr
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{escape(title)}</title>
 <meta name="description" content="{escape(desc)}">
+<link rel="icon" href="{up}favicon.ico" sizes="48x48">
 <link rel="icon" href="{up}icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="{up}icon-192.png">
 <link rel="manifest" href="{up}manifest.json">
 <link rel="canonical" href="{url}">{links}
 <meta name="robots" content="{robots}, max-image-preview:large">
@@ -256,7 +260,7 @@ def layout(path, title, desc, body, active="", ld=(), robots="index, follow", pr
 <meta property="og:site_name" content="{config.SITE_NAME}">
 <meta property="og:title" content="{escape(title)}">
 <meta property="og:description" content="{escape(desc)}">
-<meta property="og:url" content="{url}">
+<meta property="og:url" content="{url}">{og_img}
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#07080d">
 <link rel="stylesheet" href="{up}style.css">
@@ -753,7 +757,8 @@ def main():
         "theme_color": "#07080d",
         "description": "Ofertas reales en Mercado Libre",
         "icons": [
-            {"src": "icon.svg", "sizes": "512x512", "type": "image/svg+xml"}
+            {"src": "icon.svg", "sizes": "512x512", "type": "image/svg+xml"},
+            {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"}
         ]
     }
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
