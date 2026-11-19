@@ -61,7 +61,9 @@ def load():
                   (SELECT rep FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1),
                   (SELECT orig FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1),
                   (SELECT is_flash FROM prices WHERE product_id=p.id ORDER BY seen_at DESC, rowid DESC LIMIT 1)
-           FROM products p"""
+           FROM products p
+           WHERE (SELECT MAX(seen_at) FROM prices WHERE product_id=p.id) >= datetime('now', ?)""",
+        (f"-{config.MAX_AGE_DAYS} day",)  # sin confirmar hace días = agotado o sin vendedor confiable: no se publica
     ).fetchall()
     items = []
     today = date.today().isoformat()
