@@ -5,3 +5,6 @@ __pycache__/
 .venv/
 run.log
 buscar.log
+node_modules/
+.wwebjs_auth/
+.wwebjs_cache/
