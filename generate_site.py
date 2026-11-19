@@ -19,8 +19,8 @@ FAQ = [
      "El precio de referencia es la mediana de lo que costó en los últimos 90 días (así un error "
      "puntual del vendedor no infla el descuento), o el precio tachado de la tienda si es creíble. "
      "Solo mostramos descuento con al menos 3 registros o un precio tachado verificable, y nunca "
-     "descuentos mayores al 85% (esos los revisamos a mano). Además te decimos si el descuento es falso "
-     "o si el precio subió justo antes de la «oferta»."),
+     "descuentos mayores al 85% (esos los revisamos a mano). Además te decimos si es el precio más bajo "
+     "desde que lo seguimos."),
     ("¿Cuesta algo usar el sitio?",
      "No, es 100% gratuito para ti. Nuestro objetivo es ayudarte a ahorrar dinero en tus compras encontrando las verdaderas ofertas antes de que se agoten."),
     ("¿Los precios son definitivos?",
@@ -123,11 +123,6 @@ def light(now, orig, hist):
     med = sorted(ps)[len(ps) // 2]
     if now <= min(ps):
         return "g", f"🟢 Precio más bajo desde {fecha(hist[0][1])}"
-    if orig and orig >= now * 1.1 and now >= med * 0.97:
-        return "r", f"🔴 Descuento falso: suele costar {money(med)}"
-    recent = [p for p, d in hist[-8:-1] if p > med * 1.15]
-    if recent and now >= med * 0.95:
-        return "r", f"🔴 Subió a {money(max(recent))} antes de la «oferta»"
     return "y", "🟡 Precio normal"
 
 
