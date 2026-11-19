@@ -11,7 +11,7 @@ const card=x=>{const hot=x.d>=60&&!x.f,deal=x.d>=3,cl=x.f?' flash':hot?' hot':''
  `<div class="img">${x.i?`<img src="${esc(x.i)}" alt="${esc(x.n)}" loading="lazy">`:''}</div><div class="body"><span class="cat">${esc(x.c)}</span><h3><a class="st" href="${esc(x.l)}" target="_blank" rel="sponsored noopener">${esc(x.n)}</a></h3>`+
  `<p class="price"><strong>${fmt(x.p)}</strong><small>MXN</small>${deal?` <s>${fmt(x.t)}</s>`:''}</p>`+
  (deal?`<div class="bar"><i style="width:${Math.min(x.d,100)}%"></i></div><p class="save">Ahorras ${fmt(x.t-x.p)}</p>`:'')+
- `<p class="trend">${esc(x.g||'')}</p><p class="rep">✓ ${esc(x.r)}</p>${x.u?`<a class="hl" href="${up}${x.u}">📈 Ver historial de precio</a>`:''}<span class="go">Ver oferta →</span></div></div>`};
+ `<p class="trend">${esc(x.g||'')}</p>${x.u?`<a class="hl" href="${up}${x.u}">📈 Ver historial de precio</a>`:''}<a class="go" href="${esc(x.l)}" target="_blank" rel="sponsored noopener">Ver oferta →</a></div></div>`};
 // favoritos: ids guardados en este navegador
 function favs(){try{return JSON.parse(localStorage.fav||'[]')}catch(e){return[]}}
 // buscador de la barra: sugerencias en vivo; Enter abre buscar/?q=
@@ -42,7 +42,7 @@ document.querySelectorAll('.rail').forEach(r=>{const f=r.querySelector('.feat');
  const load=()=>fetch(up+'status.json',{cache:'no-store'}).then(r=>r.json()).then(j=>{sessionStorage.upd=JSON.stringify(j);set(j)}).catch(()=>{});
  const p=n=>String(n).padStart(2,'0');
  const tick=()=>{const d=Math.round((s.n-Date.now())/1e3),m=Math.round((Date.now()-s.u)/6e4);
-  if(d<=0){u.className='reloj go';u.innerHTML='<span class="lv"><i></i>EN VIVO</span><span class="tx">Actualizando precios… vuelve en unos minutos</span>';if(++k%60==0)load();return}
+  if(d<=0){u.className='reloj go';u.innerHTML='<span class="lv"><i></i>EN VIVO</span><span class="tx">Precios actualizados hace '+(m<60?m+' min':Math.floor(m/60)+' h')+'</span>';if(++k%60==0)load();return}
   const pc=Math.min(100,Math.max(0,(Date.now()-s.u)/(s.n-s.u)*100));
   u.className='reloj';u.innerHTML='<span class="lv"><i></i>EN VIVO</span><span class="tx">Próxima actualización de precios en</span>'+
    '<span class="dg"><b>'+p(Math.floor(d/3600))+'</b><em>:</em><b>'+p(Math.floor(d%3600/60))+'</b><em>:</em><b>'+p(d%60)+'</b></span>'+

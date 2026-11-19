@@ -33,7 +33,9 @@ TV = r"(?i)^(?=.*(tv|televisi|pantalla)).*\b%s\b"
 ACCESORIO = (r"(?i)\b(soporte|base|cable|antena|control remoto|funda|protector|regulador|cargador|adaptador|"
              r"refacci[oó]n|repuesto|mica|manguera|kit|carcasa|estuche|riel|brazo|tornillos?|empaque|voltaje|hdmi|vga|hub|pila|celular|tel[eé]fono|teclado|mouse|bocina|aud[ií]fonos? gamer)\b")
 HEAD_ONLY = {"Laptops", "Lavadoras", "Refrigeradores", "Consolas de videojuegos"}
+TV_ALL = "Smart TV y pantallas"
 TOPICS = [
+    (TV_ALL, r"(?i)^(?=.*(tv|televisi|pantalla)).*\b(2[4-9]|[3-9]\d)\b"),
     ("Smart TV y pantallas de 32 pulgadas", TV % 32),
     ("Smart TV y pantallas de 40 pulgadas", TV % 40),
     ("Smart TV y pantallas de 43 pulgadas", TV % 43),
@@ -68,6 +70,7 @@ def load():
     items = []
     today = date.today().isoformat()
     for name, link, cat, image, pid, now, rep, orig, is_flash in rows:
+        cat = config.CAT_RENAME.get(cat, cat)  # nombres de ML que confunden
         if now is None or not rep:  # sin vendedor confiable verificado no se publica
             continue
         hist = conn.execute("SELECT price, seen_at FROM prices WHERE product_id=? AND seen_at >= date('now', '-90 day') "
@@ -82,8 +85,6 @@ def load():
         tag = ""
         if len(ps) > 1 and ps[-1] < ps[-2] and hist[-1][1][:10] == today and (ps[-2] - now) / ps[-2] * 100 >= config.MIN_DROP_PCT:
             tag = f"Bajó {money(ps[-2] - now)} hoy (antes {money(ps[-2])})"
-        elif pct > 0:
-            tag = "En promoción"
         items.append(dict(id=pid, hd=[h[1][:10] for h in hist], name=clean_title(name), link=link, cat=cat, image=image, rep=rep, now=now, top=top, pct=pct,
                           ps=ps, since=hist[0][1], tag=tag, is_flash=bool(is_flash), light=light(now, orig, hist),
                           seen=hist[k][1].replace(" ", "T") + "Z", off=off_season(name)))
@@ -123,7 +124,7 @@ def light(now, orig, hist):
     med = sorted(ps)[len(ps) // 2]
     if now <= min(ps):
         return "g", f"🟢 Precio más bajo desde {fecha(hist[0][1])}"
-    return "y", "🟡 Precio normal"
+    return None  # fuera del mínimo no se etiqueta
 
 
 MESES = "ene feb mar abr may jun jul ago sep oct nov dic".split()
@@ -199,12 +200,9 @@ def card(i, up=""):
     save = f'<p class="save">Ahorras {money(i["top"] - i["now"])}</p>' if deal else ""
     bar = f'<div class="bar"><i style="width:{min(i["pct"], 100):.0f}%"></i></div>' if deal else ""
     sp = spark(i["ps"])
-    hist = (f'<small class="hist">{len(i["ps"])} precios desde {fecha(i["since"])} · mín {money(min(i["ps"]))} · máx {money(max(i["ps"]))}</small>'
-            if sp else "")
-    trend = (f'<p class="trend">{sp}<span>{i["tag"]}</span></p>{hist}' if i["tag"] or sp else "")
     lt = i.get("light")
-    trend += f'<p class="light {lt[0]}">{lt[1]}</p>' if lt else ""
-    trend += f'<small class="ago" data-t="{i["seen"]}"></small>' if i.get("seen") else ""
+    label = i["tag"] or (lt[1] if lt else "")  # una sola etiqueta: la bajada de hoy o el mínimo histórico
+    trend = f'<p class="trend">{sp}<span>{label}</span></p>' if label or sp else ""
     img = (f'<img src="{escape(i["image"])}" alt="{escape(i["name"])}" width="300" height="225" loading="lazy">'
            if i["image"] else "")
     page = f'<a class="hl" href="{up}{i["page"]}">📈 Ver historial de precio</a>' if i.get("page") else ""
@@ -214,8 +212,8 @@ def card(i, up=""):
   <h3><a class="st" href="{escape(aff(i['link']))}" target="_blank" rel="sponsored noopener">{escape(i['name'])}</a></h3>
   <p class="price"><strong>{money(i['now'])}</strong><small>MXN</small> {old}</p>
   {bar}{save}{trend}
-  <p class="rep">✓ {escape(i['rep'])}</p>{page}
-  <span class="go">Ver oferta →</span></div>
+  {page}
+  <a class="go" href="{escape(aff(i['link']))}" target="_blank" rel="sponsored noopener">Ver oferta →</a></div>
 </div>"""
 
 
@@ -381,7 +379,7 @@ ICONS = [(r"celular|smartphone|tel[eé]fono", "📱"), (r"laptop|comput|pc|table
          (r"hogar|mueble|decoraci|jard[ií]n|ba[ñn]o|cama", "🏠"), (r"beb[eé]|pa[ñn]al", "🍼"), (r"juguete|juego", "🧸"),
          (r"deporte|fitness|bicicleta|gimnasio", "⚽"), (r"ropa|moda|calzado|tenis|zapato|reloj", "👟"),
          (r"mascota|perro|gato", "🐾"), (r"auto|veh[ií]culo|moto|llanta", "🚗"), (r"salud|vitamina|suplemento", "💊"),
-         (r"c[aá]mara|foto", "📷"), (r"oficina|papeler|escolar|libro", "📚")]
+         (r"c[aá]mara|foto", "📷"), (r"impresora|cartucho|t[oó]ner", "🖨️"), (r"despensa|alimento|bebida|abarrote", "🛒"), (r"m[eé]dic|ortop", "🩺"), (r"oficina|papeler|escolar|libro", "📚")]
 
 
 def icon(cat):
@@ -425,28 +423,27 @@ def home(items, deals, lists, seasons=()):
     rails = "".join(rail(f"Lo mejor en {escape(c)}", sel,
                          f'<a class="all" href="{cpath[c]}">Ver todo →</a>' if c in cpath else "")
                     for c in cats if len(sel := take([d for d in deals if d["cat"] == c], 15)) >= 4)
-    uni = ""
-    if config.UNISHOPP_URL:  # publicidad propia: fuera del ranking de ofertas y marcada como tal
-        uni = (f'<section class="wrap promos ad"><a class="promo uni" href="{escape(config.UNISHOPP_URL)}" target="_blank" rel="noopener">'
-               f'<div><span class="pk">Publicidad · sitio propio</span><b>{escape(config.UNISHOPP_TEXT)}</b><p>Visita unishopp →</p></div></a></section>')
+    # franja delgada arriba: publicidad propia + espacio para anunciantes (abre un correo al dueño)
+    uni = (f'<a class="ad-main" href="{escape(config.UNISHOPP_URL)}" target="_blank" rel="sponsored noopener"><span class="ad-label">Publicidad</span>'
+           f'<strong>{escape(config.UNISHOPP_TEXT)}</strong><span class="ad-cta">Visitar →</span></a>') if config.UNISHOPP_URL else ""
+    slot = (f'<a class="ad-slot" href="mailto:{config.ADS_EMAIL}?subject=Quiero%20anunciarme%20en%20{config.SITE_NAME}">'
+            '✉️ <strong>Anúnciate aquí</strong><small>Llega a miles de compradores</small></a>') if config.ADS_EMAIL else ""
+    ad_strip = f'<section class="wrap ad-strip">{uni}{slot}</section>' if uni or slot else ""
     ads_sec = f'<section class="wrap promos">{ads}</section>' if ads else ""
-    explore = "".join(f'<a class="chip" href="{p}">{escape(n)}</a>' for p, n, k, _ in lists if k == "t")
-    big = "".join(f'<a class="chip" href="{cpath[c]}">{icon(c)} {escape(c)}</a>' for c, _ in Counter(i["cat"] for i in deals).most_common(12) if c in cpath)
-    explore_sec = (f'<section class="wrap"><h2>Explora por categoría</h2><div class="chips wrapc"><a class="chip on" href="c/">Todas las categorías</a>{big}</div>'
-                   f'<div class="chips wrapc">{explore}</div>'
-                   f'<h2>Fechas especiales</h2><div class="chips wrapc">{"".join(f"<a class=chip href={p}>{escape(n)}</a>" for n, p, _, s in seasons if s)}</div></section>')
+    # sin los 5 tamaños de TV: viven dentro de la página de pantallas
+    explore = "".join(f'<a class="chip" href="{p}">{icon(n)} {escape(n)}</a>' for p, n, k, _ in lists if k == "t" and not n.startswith(TV_ALL + " de"))
+    big = "".join(f'<a class="chip" href="{cpath[c]}">{icon(c)} {escape(c)}</a>' for c, _ in Counter(i["cat"] for i in deals).most_common(8) if c in cpath)
+    month = date.today().month  # solo la fecha especial en temporada; las demás siguen en su página
+    now_s = "".join(f'<a class="chip" href="{p}">🎉 {escape(n)}</a>' for n, p, _, sl in seasons if sl and month in SEASON_MONTHS.get(n, ()))
+    explore_sec = (f'<section class="wrap"><h2>Explora por categoría</h2><div class="chips wrapc">{big}{explore}{now_s}'
+                   '<a class="chip on" href="c/">Ver todas →</a></div></section>')
     faq = "".join(f"<details><summary>{escape(q)}</summary><p>{escape(a)}</p></details>" for q, a in FAQ)
     body = f"""<section class="hero"><div class="wrap">
   <p class="eyebrow"><span class="dot"></span> Mercado Libre México · {len(items)} productos vigilados · Actualizado {today}</p>
-  <h1>Los precios cambian todo el tiempo.<br><em>Nosotros los vigilamos por ti.</em></h1>
-  <p class="lead">Encuentra las <strong>ofertas relámpago</strong> y las bajas de precio que sí son reales, comparadas con el historial de cada producto. Cero descuentos inventados.</p>
-  <ul class="perks"><li>⚡ Relámpago al momento</li><li>📉 Solo bajas verificadas</li><li>🔄 5 actualizaciones al día</li></ul>
-  <div class="cta">
-    <a class="btn big" href="ofertas/">Ver todas las ofertas</a>
-    <a class="ghost" href="#como-funciona">Cómo funciona</a>
-  </div>
+  <h1>Los precios cambian todo el tiempo. <em>Nosotros los vigilamos por ti.</em></h1>
+  <p class="lead">Bajas de precio reales, comparadas con el historial de cada producto. 10 actualizaciones al día. <a href="#como-funciona">Cómo funciona</a></p>
 </div></section>
-{explore_sec}
+{ad_strip}
 {ads_sec}
 {flash_rail}
 {best_rail}
@@ -459,8 +456,8 @@ def home(items, deals, lists, seasons=()):
   </ol>
 </section>
 {rails}
+{explore_sec}
 <section id="faq" class="wrap"><h2>Preguntas frecuentes</h2>{faq}</section>
-{uni}
 
 """
     return layout("", title, desc, body, "Inicio", ld)
@@ -551,6 +548,8 @@ SPECIAL = [
     ("Día del Padre", "dia-del-padre", "el tercer domingo de junio",
      r"(?i)herramienta|taladro|reloj|parrilla|asador|rasuradora|afeitadora|smartwatch"),
 ]
+SEASON_MONTHS = {"Buen Fin": (11,), "Hot Sale": (5, 6), "Navidad": (11, 12), "Día de Reyes": (12, 1), "Día de las Madres": (4, 5),
+                 "San Valentín": (1, 2), "Regreso a clases": (7, 8), "Día del Padre": (6,)}
 RANGES = (1000, 2000, 3000, 5000, 8000, 10000, 15000, 20000)
 
 
@@ -695,6 +694,8 @@ def build(items):
         lead = f"{len(sel)} opciones desde {lo(sel)} MXN. Solo vendedores confiables (nivel verde, MercadoLíder o tienda oficial); precios comparados con su historial. Actualizado {today}."
         key = path[:-1] if kind == "t" else "c:" + name
         trail = [(config.SITE_NAME, ""), (hubname, f"{kind}/"), (name, path)]
+        if name == TV_ALL:
+            lead += " Por tamaño: " + " ".join(f'<a class="chip" href="%UP%{q}">{n[len(TV_ALL) + 4:]}</a>' for q, n, k, _ in lists if n.startswith(TV_ALL + " de"))
         if kind == "t":  # páginas fijas por rango de precio ("laptops de menos de $10,000")
             rng = [(m, sub) for m in RANGES if 5 <= len(sub := [i for i in sel if i["now"] < m]) <= 0.8 * len(sel)][:3]
             if rng:

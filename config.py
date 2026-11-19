@@ -11,6 +11,8 @@ GOATCOUNTER = "rebajea"  # código de tu cuenta en goatcounter.com (https://CODI
 CONTACT_EMAIL = ""  # correo público de contacto para las páginas legales (derechos ARCO); vacío = no se muestra
 OUT_DIR = BASE_DIR / "docs"
 UNISHOPP_URL = "https://unishopp-oficial.netlify.app"  # banner propio hacia tu marketplace en la portada; vacío = no se muestra
+ADS_EMAIL = "cristocontreras2@gmail.com"  # "Anúnciate aquí" abre un correo a esta dirección; vacío = no se muestra
+CAT_RENAME = {"Handball": "Tenis y calzado", "Laboratorios y Mini Labs": "Impresoras", "Frescos": "Despensa"}  # nombres de ML que confunden
 UNISHOPP_TEXT = "Compra y vende en unishopp, el marketplace mexicano"
 
 SITE = "MLM"  # Mercado Libre México
