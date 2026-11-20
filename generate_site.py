@@ -323,9 +323,9 @@ def layout(path, title, desc, body, active="", ld=(), robots="index, follow", pr
 <meta property="og:description" content="{escape(desc)}">
 <meta property="og:url" content="{url}">{og_img}
 <meta name="twitter:card" content="summary_large_image">
-<meta name="theme-color" content="#f6f1e7">
+<meta name="theme-color" content="#f7f7f5">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500..800;1,9..144,600&family=Instrument+Sans:wght@400..700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Geist:wght@400..700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{up}style.css">
 <script type="application/ld+json">{json.dumps(list(ld), ensure_ascii=False)}</script>
 </head>
@@ -825,7 +825,7 @@ def main():
         + "".join(f"\n<url><loc>{config.SITE_URL}/{p}</loc><lastmod>{lastmod.get(p, today)}</lastmod>"
                   "<changefreq>daily</changefreq></url>" for p in pages if "noindex" not in pages[p]) + "\n</urlset>\n")
     (out / "icon.svg").write_text(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#e8452c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V3h7.5a5 5 0 0 1 0 10H6"/><path d="M10 13l8 8"/><path d="M18 15v6h-6"/></svg>',
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ef3340" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V3h7.5a5 5 0 0 1 0 10H6"/><path d="M10 13l8 8"/><path d="M18 15v6h-6"/></svg>',
         encoding="utf-8"
     )
     
@@ -834,8 +834,8 @@ def main():
         "short_name": config.SITE_NAME,
         "start_url": "./",
         "display": "standalone",
-        "background_color": "#f6f1e7",
-        "theme_color": "#f6f1e7",
+        "background_color": "#f7f7f5",
+        "theme_color": "#f7f7f5",
         "description": "Ofertas reales en Mercado Libre",
         "icons": [
             {"src": "icon.svg", "sizes": "512x512", "type": "image/svg+xml"},
