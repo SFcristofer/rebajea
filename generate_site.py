@@ -1,5 +1,7 @@
 """Genera el sitio estático en docs/ desde prices.db. Ejecutar: python generate_site.py"""
+import heapq
 import json
+import math
 import shutil
 import re
 import unicodedata
@@ -49,6 +51,9 @@ TOPICS = [
 ]
 
 
+_d = date.today()  # tema navideño automático: 15 nov - 6 ene
+XMAS = ' class="xmas"' if (_d.month == 11 and _d.day >= 15) or _d.month == 12 or (_d.month == 1 and _d.day <= 6) else ""
+
 def slug(s):
     s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
     return re.sub(r"[^a-z0-9]+", "-", s).strip("-")
@@ -88,12 +93,68 @@ def load():
         items.append(dict(id=pid, hd=[h[1][:10] for h in hist], name=clean_title(name), link=link, cat=cat, image=image, rep=rep, now=now, top=top, pct=pct,
                           ps=ps, since=hist[0][1], tag=tag, is_flash=bool(is_flash), light=light(now, orig, hist),
                           seen=hist[k][1].replace(" ", "T") + "Z", off=off_season(name)))
-    # fuera de temporada al final; luego mejor promoción primero; a igualdad, el más barato
-    items.sort(key=lambda i: (i["off"], -i["pct"], i["now"]))
+    for i in items:
+        i["score"] = score(i)
+    # fuera de temporada al final; luego la mejor promoción según su puntaje (no solo el % de descuento)
+    items.sort(key=lambda i: (i["off"], -i["score"], i["now"]))
     if review:
         print(f"Revisión manual: {len(review)} productos con descuento > {MAX_PCT}% (no se muestra descuento)")
         print("\n".join(review[:30]))
     return items
+
+
+REP_W = {"Tienda oficial": 4, "MercadoLíder Platinum": 4, "MercadoLíder Gold": 3, "MercadoLíder Silver": 2, "Vendedor confiable": 1}
+
+
+def score(i):
+    """Puntaje de la promoción (0-100 aprox.), O(1) por producto → ordenar todo es O(n log n).
+    Combina: % de descuento (con tope, para que un -90% dudoso no gane solo), ahorro en pesos (escala log:
+    $5,000 menos en una TV pesa más que $50 en un cable, pero sin aplastar lo barato), baja real contra la
+    mediana de su historial (más precios = más confianza), mínimo histórico, relámpago, bajó hoy y reputación."""
+    pct = min(i["pct"], 70)
+    ps = i["ps"]
+    s = pct / 70 * 40 + min(math.log10(1 + max(i["top"] - i["now"], 0)) * 5, 20)
+    if len(ps) >= 3:
+        med = sorted(ps)[len(ps) // 2]
+        real = max(0.0, (med - i["now"]) / med * 100)
+        s += min(real, 40) / 40 * 15 * min(len(ps), 10) / 10
+        if i["now"] <= min(ps):
+            s += 6
+    s += 8 if i["is_flash"] else 0
+    s += 6 if i["tag"] else 0
+    s += REP_W.get(i["rep"], 0)
+    return round(s, 2)
+
+
+def mix(items, gap=2):
+    """Intercala categorías sin perder el orden por puntaje: toma siempre la mejor oferta cuya categoría no
+    salió en las últimas `gap` posiciones (montículo de cabezas por categoría: O(n log k), k = categorías)."""
+    queues = {}
+    for i in items:
+        queues.setdefault(i["cat"], []).append(i)
+    heads = [(-q[0]["score"], n, c) for n, (c, q) in enumerate(queues.items())]
+    heapq.heapify(heads)
+    pos = {c: 0 for c in queues}
+    out, recent, wait = [], [], []
+    while heads or wait:
+        if not heads:  # solo quedan categorías "recientes": se aceptan para no perder productos
+            heads, wait = wait, []
+            heapq.heapify(heads)
+            recent = []
+        h = heapq.heappop(heads)
+        if h[2] in recent:
+            wait.append(h)
+            continue
+        c = h[2]
+        out.append(queues[c][pos[c]])
+        pos[c] += 1
+        recent = (recent + [c])[-gap:]
+        for w in wait:
+            heapq.heappush(heads, w)
+        wait = []
+        if pos[c] < len(queues[c]):
+            heapq.heappush(heads, (-queues[c][pos[c]]["score"], h[1], c))
+    return out
 
 
 # temporadas: (regex en el nombre, desde MM-DD, hasta MM-DD); fuera de fecha el producto baja al final y sale de la portada
@@ -262,14 +323,16 @@ def layout(path, title, desc, body, active="", ld=(), robots="index, follow", pr
 <meta property="og:description" content="{escape(desc)}">
 <meta property="og:url" content="{url}">{og_img}
 <meta name="twitter:card" content="summary_large_image">
-<meta name="theme-color" content="#07080d">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500..800;1,9..144,600&family=Instrument+Sans:wght@400..700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{up}style.css">
 <script type="application/ld+json">{json.dumps(list(ld), ensure_ascii=False)}</script>
 </head>
-<body data-up="{up}">
+<body{XMAS} data-up="{up}">
 <header class="top"><div class="wrap nav">
   <a class="logo" href="{up}">
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: #00e57a; margin-right: 4px; vertical-align: bottom;"><path d="M6 21V3h7.5a5 5 0 0 1 0 10H6"/><path d="M10 13l8 8"/><path d="M18 15v6h-6"/></svg>
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:bottom"><path d="M6 21V3h7.5a5 5 0 0 1 0 10H6"/><path d="M10 13l8 8"/><path d="M18 15v6h-6"/></svg>
     {config.SITE_NAME}
   </a>
   <form class="sb" action="{up}buscar/" role="search"><input id="q" name="q" type="search" placeholder="Buscar productos…" aria-label="Buscar producto" autocomplete="off"><div id="sug" hidden></div></form>
@@ -366,7 +429,7 @@ def hub(path, active, name, h1, lead, entries):
     """Índice de categorías o temas: entries = [(nombre, ruta, items)]."""
     up = rel(path)
     def tile(n, p, s):
-        top = max((i for i in s if i["image"]), key=lambda i: i["pct"], default=None)  # portada: el de mayor descuento
+        top = max((i for i in s if i["image"]), key=lambda i: i["score"], default=None)  # portada: la mejor promoción
         img = f'<img src="{escape(top["image"])}" alt="" loading="lazy">' if top else ""
         up_to = f' · hasta -{top["pct"]:.0f}%' if top and top["pct"] >= 1 else ""
         return (f'<a class="tile" href="{up}{p}"><span class="ti">{img}</span><strong>{escape(n)}</strong>'
@@ -427,12 +490,12 @@ def home(items, deals, lists, seasons=()):
     rails = "".join(rail(f"Lo mejor en {escape(c)}", sel,
                          f'<a class="all" href="{cpath[c]}">Ver todo →</a>' if c in cpath else "")
                     for c in cats if len(sel := take([d for d in deals if d["cat"] == c], 15)) >= 4)
-    # franja delgada arriba: publicidad propia + espacio para anunciantes (abre un correo al dueño)
-    uni = (f'<a class="ad-main" href="{escape(config.UNISHOPP_URL)}" target="_blank" rel="sponsored noopener"><span class="ad-label">Publicidad</span>'
-           f'<strong>{escape(config.UNISHOPP_TEXT)}</strong><span class="ad-cta">Visitar →</span></a>') if config.UNISHOPP_URL else ""
-    slot = (f'<a class="ad-slot" href="mailto:{config.ADS_EMAIL}?subject=Quiero%20anunciarme%20en%20{config.SITE_NAME}">'
+    # franja delgada arriba (clases rb-* neutras: nombres tipo "ad-*" los ocultan los bloqueadores de anuncios): publicidad propia + espacio para anunciantes (abre un correo al dueño)
+    uni = (f'<a class="rb-uni" href="{escape(config.UNISHOPP_URL)}" target="_blank" rel="sponsored noopener"><span class="rb-tag">Publicidad</span>'
+           f'<strong>{escape(config.UNISHOPP_TEXT)}</strong><span class="rb-go">Visitar →</span></a>') if config.UNISHOPP_URL else ""
+    slot = (f'<a class="rb-hire" href="mailto:{config.ADS_EMAIL}?subject=Quiero%20anunciarme%20en%20{config.SITE_NAME}">'
             '✉️ <strong>Anúnciate aquí</strong><small>Llega a miles de compradores</small></a>') if config.ADS_EMAIL else ""
-    ad_strip = f'<section class="wrap ad-strip">{uni}{slot}</section>' if uni or slot else ""
+    ad_strip = f'<section class="wrap rb-band">{uni}{slot}</section>' if uni or slot else ""
     ads_sec = f'<section class="wrap promos">{ads}</section>' if ads else ""
     # sin los 5 tamaños de TV: viven dentro de la página de pantallas
     explore = "".join(f'<a class="chip" href="{p}">{icon(n)} {escape(n)}</a>' for p, n, k, _ in lists if k == "t" and not n.startswith(TV_ALL + " de"))
@@ -561,7 +624,8 @@ def season_items(items, rx):
     sel = [i for i in items if not i["off"] and (rx is None or re.search(rx, i["name"]))]
     if rx is None:
         sel = [i for i in sel if i["pct"] >= config.MIN_DROP_PCT]
-    return sorted(sel, key=lambda i: (i["pct"] < config.MIN_DROP_PCT, -i["pct"], i["now"]))[:240]
+    sel.sort(key=lambda i: (i["pct"] < config.MIN_DROP_PCT, -i["score"]))
+    return mix(sel[:240]) if rx is None else sel[:240]
 
 
 def chart(i):
@@ -620,7 +684,7 @@ def product_page(i, related, cat_path):
 def build(items):
     """Todas las páginas del sitio: {ruta: html}."""
     today = date.today().isoformat()
-    deals = [i for i in items if i["pct"] >= config.MIN_DROP_PCT]
+    deals = mix([i for i in items if i["pct"] >= config.MIN_DROP_PCT and not i["off"]]) + [i for i in items if i["pct"] >= config.MIN_DROP_PCT and i["off"]]
     for i in items:  # página propia solo con historial que aporte algo (≥5 precios y que haya cambiado)
         if len(i["ps"]) >= 5 and max(i["ps"]) != min(i["ps"]):
             i["page"] = f"p/{slug(i['name'])[:60].strip('-')}-{i['id'].lower()}/"
@@ -675,9 +739,9 @@ def build(items):
     pages.update(paged(
         "ofertas/", "Ofertas", [(config.SITE_NAME, ""), ("Ofertas", "ofertas/")],
         "Todas las ofertas en Mercado Libre México",
-        f"{len(deals)} ofertas en Mercado Libre México con vendedores confiables, ordenadas de mayor a menor descuento. Actualizado {today}.",
+        f"{len(deals)} ofertas en Mercado Libre México con vendedores confiables, ordenadas por la mejor promoción (descuento, ahorro e historial). Actualizado {today}.",
         "Todas las ofertas en Mercado Libre",
-        f"{len(deals)} productos con baja de precio, primero los de mayor descuento. Solo vendedores confiables. Actualizado {today}.",
+        f"{len(deals)} productos con baja de precio, primero las mejores promociones (descuento, ahorro real e historial) y sin repetir categoría seguida. Solo vendedores confiables. Actualizado {today}.",
         deals, key="ofertas"))
     for kind, tab, name, h1, lead in (
             ("c", "Categorías", "Categorías", "Ofertas por categoría",
@@ -761,7 +825,7 @@ def main():
         + "".join(f"\n<url><loc>{config.SITE_URL}/{p}</loc><lastmod>{lastmod.get(p, today)}</lastmod>"
                   "<changefreq>daily</changefreq></url>" for p in pages if "noindex" not in pages[p]) + "\n</urlset>\n")
     (out / "icon.svg").write_text(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#00e57a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V3h7.5a5 5 0 0 1 0 10H6"/><path d="M10 13l8 8"/><path d="M18 15v6h-6"/></svg>',
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#e8452c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V3h7.5a5 5 0 0 1 0 10H6"/><path d="M10 13l8 8"/><path d="M18 15v6h-6"/></svg>',
         encoding="utf-8"
     )
     
@@ -770,8 +834,8 @@ def main():
         "short_name": config.SITE_NAME,
         "start_url": "./",
         "display": "standalone",
-        "background_color": "#07080d",
-        "theme_color": "#07080d",
+        "background_color": "#f6f1e7",
+        "theme_color": "#f6f1e7",
         "description": "Ofertas reales en Mercado Libre",
         "icons": [
             {"src": "icon.svg", "sizes": "512x512", "type": "image/svg+xml"},

@@ -3,8 +3,8 @@
   "short_name": "Rebajea",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#07080d",
-  "theme_color": "#07080d",
+  "background_color": "#f6f1e7",
+  "theme_color": "#f6f1e7",
   "description": "Ofertas reales en Mercado Libre",
   "icons": [
     {

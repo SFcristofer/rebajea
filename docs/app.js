@@ -70,3 +70,25 @@ drawFav();
   load().then(all=>{r=all.filter(x=>inK(x)&&(!mx||x.p<mx)&&(!p||x.p<=p)&&x.d>=d&&(!f||x.f));if(o)r.sort(S[o]);
    n=0;lst.innerHTML='';pgr.hidden=true;fc.textContent=r.length+(r.length==1?' producto':' productos');show()})};
  [fp,fd,ff,fo].forEach(e=>e.onchange=run);more.onclick=show})();
+
+/* Nieve navideña: solo con body.xmas, respeta reduced-motion y se pausa con la pestaña oculta */
+(function () {
+  if (!document.body.classList.contains('xmas') || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var c = document.createElement('canvas'), x = c.getContext('2d'), w, h, f = [], raf;
+  c.id = 'snow'; c.setAttribute('aria-hidden', 'true'); document.body.appendChild(c);
+  function size() { w = c.width = innerWidth; h = c.height = innerHeight; }
+  size(); addEventListener('resize', size);
+  var n = innerWidth < 600 ? 28 : 60;
+  for (var i = 0; i < n; i++) f.push({ x: Math.random() * w, y: Math.random() * h, r: 1 + Math.random() * 2.6, s: .3 + Math.random() * .9, d: Math.random() * 6.28 });
+  function tick() {
+    x.clearRect(0, 0, w, h); x.fillStyle = 'rgba(120,150,190,.7)'; x.beginPath();
+    for (var i = 0; i < f.length; i++) {
+      var p = f[i]; p.d += .01; p.y += p.s; p.x += Math.sin(p.d) * .4;
+      if (p.y > h + 5) { p.y = -5; p.x = Math.random() * w; }
+      x.moveTo(p.x, p.y); x.arc(p.x, p.y, p.r, 0, 6.28);
+    }
+    x.fill(); raf = requestAnimationFrame(tick);
+  }
+  document.addEventListener('visibilitychange', function () { if (document.hidden) cancelAnimationFrame(raf); else tick(); });
+  tick();
+})();
